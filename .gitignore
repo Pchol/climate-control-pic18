@@ -1,7 +1,9 @@
 build/
 dist/
 nbproject/
+sht/
 Makefile
+l.obj
 CTM12.pdf
 CTMU2.pdf
 manual.pdf
@@ -9,4 +11,6 @@ pic18_plib.pdf
 CTMU1.pdf
 CTMU3.pdf
 funclist
-
+PIC18FXX2_manual.pdf
+MPLAB_XC8_Peripheral_Libraries.pdf
+sht1x_manual.pdf
