@@ -1,0 +1,12 @@
+build/
+dist/
+nbproject/
+Makefile
+CTM12.pdf
+CTMU2.pdf
+manual.pdf
+pic18_plib.pdf
+CTMU1.pdf
+CTMU3.pdf
+funclist
+
