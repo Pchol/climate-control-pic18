@@ -2,6 +2,7 @@ build/
 dist/
 nbproject/
 Makefile
+l.obj
 CTM12.pdf
 CTMU2.pdf
 manual.pdf
