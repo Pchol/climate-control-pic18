@@ -56,7 +56,7 @@ void main(void) {
 	* Current of 0.55uA
 	*/
 
-    ctmucon1 = CTMU_DISABLE | CTMU_IDLE_STOP | CTMU_TIME_GEN_ENABLE | CTMU_EDGE_SEQUENCE_ON | CTMU_ANA_CURR_SOURCE_GND | CTMU_TRIG_OUTPUT_DISABLE | CTMU_INT_OFF;
+    ctmucon1 = CTMU_ENABLE | CTMU_IDLE_STOP | CTMU_TIME_GEN_ENABLE | CTMU_EDGE_SEQUENCE_OFF | CTMU_ANA_CURR_SOURCE_GND | CTMU_TRIG_OUTPUT_DISABLE | CTMU_INT_OFF;
     ctmucon2 = CTMU_EDGE2_POLARITY_POS | CTMU_EDGE2_SOURCE_CTED1 | CTMU_EDGE1_POLARITY_POS | CTMU_EDGE1_SOURCE_CTED1;
     ctmuicon = 0;
 
@@ -86,5 +86,6 @@ void main(void) {
 	capacitance = (current * time)/voltage; // calculate the Capacitance value
 	CloseADC();// disable ADC
 	CloseCTMU();//disable CTMU
+
 	while(1);//End of program
 }
