@@ -8,33 +8,21 @@
 
 #define USE_OR_MASKS
 
-//float valtage, current, capacitance, time;
-
-/*
-int measuringADC(){
-	unsigned int result;
-//	ADC_INT_ENABLE();
-	ConvertADC();//start
-
-	while(BusyADC());
-	result = ReadADC();
-	return result;
-}
-*/
-
 struct {
-    float adc;
-    float humidutyWather;
-    float humidutySoil;
+//    float adc;
+//    float humidutyWather;
+//    float humidutySoil;
     char temp[2];
 } data;
 
 struct {
 	char maxTemp;
-} level = {20};
+	char minTemp;
+} level = {40, 38};
 
 struct {
-	char lamp;
+	char lampOn;
+	char lampOff;
 } run;
 
 void measurementTemp(void){
@@ -75,18 +63,31 @@ void measurement(){
 
 }
 
-void compare(){
-    //сравнение с показаниями и принятие решение какие устройства должны быть включены
-    if (data.temp[0] > level.maxTemp){
-		run.lamp = 0xff;
-    }
+char lampBurn(void){
+	if (!LATBbits.LATB5){
+		return 0xff;
+	} else {
+		return 0;
+	}
 }
 
-void execution(){
+void compare(){
+    //сравнение с показаниями и принятие решение какие устройства должны быть включены
+    if (data.temp[0] < level.minTemp && !lampBurn()){
+		run.lampOn = 0xff;
+	} else if (data.temp[0] > level.maxTemp && lampBurn()){
+		run.lampOff = 0xff;
+	}
+}
+
+void execution(void){
     //исполнение
-	if (run.lamp){
-	
-		run.lamp = 0;
+	if (run.lampOn){
+		LATBbits.LATB5 = 0;
+		run.lampOn = 0x0;
+	} else if (run.lampOff){
+		LATBbits.LATB5 = 1;
+		run.lampOff = 0x0;
 	}
 }
 
@@ -100,9 +101,15 @@ void configI2C(void){
 	DisableIntI2C1;
 }
 
+void configPorts(void){
+	TRISB = 0;
+//	PORTB = 0;
+}
+
 
 //function initializiation all components
 void init(){
+    configPorts();
     configI2C();
 //    configADC();
 //    configCTMU();
