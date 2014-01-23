@@ -1,6 +1,7 @@
 build/
 dist/
 nbproject/
+sht/
 Makefile
 l.obj
 CTM12.pdf
