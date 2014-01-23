@@ -13,7 +13,7 @@
     //    float humidutyWather;
     //    float humidutySoil;
         float capacitance;
-        char temp[2];
+        float temp;
         float humi;
         float temp2;
     } data;
@@ -48,38 +48,46 @@ const float d2=0.01;
 
 unsigned int SoT;
 unsigned int SoRh;
-
 //sht11 required
 
-    void measurementTemp(void){
+void measurementTemp(void){
 
-    //  char data.temp;
+  float t[2];
+  char error = 0;
 
-      IdleI2C1();
-      StartI2C1();
+  IdleI2C1();
+  StartI2C1();
 
-      IdleI2C1();
-      WriteI2C1(0x90 & 0xfe);//1001000 1001101
+  IdleI2C1();
+  if (WriteI2C1(0x90 & 0xfe) == -2){
+	  error = 1;
+  }
 
-      IdleI2C1();
-      WriteI2C1(0x00);
+  IdleI2C1();
+  if (WriteI2C1(0x00) == -2){
+	  error = 1;
+  }
 
-      IdleI2C1();
-      RestartI2C1();
+  IdleI2C1();
+  RestartI2C1();
 
-      IdleI2C1();
-      WriteI2C1(0x90 | 0x01);
+  IdleI2C1();
+  if (WriteI2C1(0x90 | 0x01)){
+	  error = 1;
+  }
 
-      IdleI2C1();
-      data.temp[0] = ReadI2C1();
-      AckI2C1();
+  IdleI2C1();
+  t[0] = ReadI2C1();
+  AckI2C1();
 
-      IdleI2C1();
-      data.temp[1] = ReadI2C1();
-      IdleI2C1();
-      NotAckI2C1();
-      StopI2C1();
-    }
+  IdleI2C1();
+  t[1] = ReadI2C1();
+  IdleI2C1();
+  NotAckI2C1();
+  StopI2C1();
+
+  data.temp = t[0]+(float)0xff/t[1];
+}
 
     void measurementC(void){
 
@@ -176,11 +184,11 @@ void measurementHumiTemp(){
 
     void measurement(void){
       //измерение влажности воздуха
-      measurementHumiTemp();
+//      measurementHumiTemp();
       //измерение температуры
 //      measurementTemp();
       //измерение влажности почвы
-//      measurementC();
+      measurementC();
 
     }
 
@@ -194,9 +202,9 @@ void measurementHumiTemp(){
 
     void compare(){
         //сравнение с показаниями и принятие решение какие устройства должны быть включены
-        if (data.temp[0] < level.minTemp && !lampBurn()){
+        if (data.temp < level.minTemp && !lampBurn()){
             run.lampOn = 0xff;
-        } else if (data.temp[0] > level.maxTemp && lampBurn()){
+        } else if (data.temp > level.maxTemp && lampBurn()){
             run.lampOff = 0xff;
         }
     }
@@ -265,7 +273,7 @@ void measurementHumiTemp(){
 
         OSCCONbits.IRCF0 = 0;
         OSCCONbits.IRCF1 = 1;
-        OSCCONbits.IRCF2 = 1;//freq = 4MGz
+        OSCCONbits.IRCF2 = 1;//freq = 8MGz
 
         configPorts();
         configI2C();
@@ -282,8 +290,8 @@ void measurementHumiTemp(){
 
         while(1){
             measurement();
-//            compare();
-//            execution();
+            compare();
+            execution();
             __delay_ms(20);
         }
     }
