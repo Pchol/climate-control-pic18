@@ -1,4 +1,4 @@
-    #include <stdio.h>
+   #include <stdio.h>
     #include <stdlib.h>
 
     #include "config.h"
@@ -94,9 +94,9 @@ void measurementTemp(void){
       unsigned int Vread=0;
       float voltage;// Vcal=0, CTMUISrc = 0;
       float time = 15;
-      float current = 5.5;//experiment time*current
-      float ownCap = 33.8;//own capacitance
-      float v = 5.0;
+      float current = 0.55;//experiment time*current
+      float ownCap = 0;//own capacitance
+      float v = 3.25;
 
       CTMUCONHbits.CTMUEN = 1; //Enable the CTMU
       CTMUCONLbits.EDG1STAT = 0; // Set Edge status bits to zero
@@ -116,7 +116,7 @@ void measurementTemp(void){
 
       Vread = ADRES;
 
-      voltage = (float)(v*Vread/1024.0);
+      voltage = (float)(v*Vread/1023.0);
       data.capacitance = (float)(time*current/voltage - ownCap);//result in pf
     }
 
@@ -127,43 +127,43 @@ void measure(char parametr){
 	char checksum;
 	char *uk;
 
-		//	select temp register
-		IdleI2C1();
-		StartI2C1();
-		IdleI2C1();
+	//	select temp register
+	IdleI2C1();
+	StartI2C1();
+	IdleI2C1();
 
-		StopI2C1();
-		IdleI2C1();
-		RestartI2C1();
-		IdleI2C1();
+	StopI2C1();
+	IdleI2C1();
+	RestartI2C1();
+	IdleI2C1();
 
-		if (WriteI2C1(parametr) == -2){
-			error = 1;
+	if (WriteI2C1(parametr) == -2){
+		error = 1;
+	}
+
+	if (!error){
+		if (parametr == MEASURE_HUMI){
+			__delay_ms(80);
+			uk=(unsigned char)&SoRh;
+		} else if (parametr == MEASURE_TEMP){
+			__delay_ms(80);
+			__delay_ms(80);
+			__delay_ms(80);
+			__delay_ms(80);
+			uk=(unsigned char)&SoT;
 		}
 
-		if (!error){
-			if (parametr == MEASURE_HUMI){
-				__delay_ms(80);
-				uk=(unsigned char)&SoRh;
-			} else if (parametr == MEASURE_TEMP){
-				__delay_ms(80);
-				__delay_ms(80);
-				__delay_ms(80);
-				__delay_ms(80);
-				uk=(unsigned char)&SoT;
-			}
+		IdleI2C1();
+		*(uk+1)=ReadI2C1();
+		AckI2C1();
 
-			IdleI2C1();
-			*(uk+1)=ReadI2C1();
-			AckI2C1();
+		IdleI2C1();
+		*(uk)=ReadI2C1();
+		AckI2C1();
 
-			IdleI2C1();
-			*(uk)=ReadI2C1();
-			AckI2C1();
-
-			IdleI2C1();
-			checksum = ReadI2C1();
-			NotAckI2C1();
+		IdleI2C1();
+		checksum = ReadI2C1();
+		NotAckI2C1();
 	}
 }
 
@@ -182,116 +182,116 @@ void measurementHumiTemp(){
   calculation();
 }
 
-    void measurement(void){
-      //измерение влажности воздуха
+void measurement(void){
+  //измерение влажности воздуха
 //      measurementHumiTemp();
-      //измерение температуры
+  //измерение температуры
 //      measurementTemp();
-      //измерение влажности почвы
-      measurementC();
+  //измерение влажности почвы
+  measurementC();
 
-    }
+}
 
-    char lampBurn(void){
-        if (!LATBbits.LATB5){
-            return 0xff;
-        } else {
-            return 0;
-        }
-    }
+char lampBurn(void){
+	if (!LATBbits.LATB5){
+		return 0xff;
+	} else {
+		return 0;
+	}
+}
 
-    void compare(){
-        //сравнение с показаниями и принятие решение какие устройства должны быть включены
-        if (data.temp < level.minTemp && !lampBurn()){
-            run.lampOn = 0xff;
-        } else if (data.temp > level.maxTemp && lampBurn()){
-            run.lampOff = 0xff;
-        }
-    }
+void compare(){
+	//сравнение с показаниями и принятие решение какие устройства должны быть включены
+	if (data.temp < level.minTemp && !lampBurn()){
+		run.lampOn = 0xff;
+	} else if (data.temp > level.maxTemp && lampBurn()){
+		run.lampOff = 0xff;
+	}
+}
 
-    void execution(void){
-        //исполнение
-        if (run.lampOn){
-            LATBbits.LATB5 = 0;
-            run.lampOn = 0x0;
-        } else if (run.lampOff){
-            LATBbits.LATB5 = 1;
-            run.lampOff = 0x0;
-        }
-    }
+void execution(void){
+	//исполнение
+	if (run.lampOn){
+		LATBbits.LATB5 = 0;
+		run.lampOn = 0x0;
+	} else if (run.lampOff){
+		LATBbits.LATB5 = 1;
+		run.lampOff = 0x0;
+	}
+}
 
-    void configPorts(void){
-        TRISB = 0;
-    //	PORTB = 0;
-    }
+void configPorts(void){
+	TRISB = 0;
+//	PORTB = 0;
+}
 
-    void configI2C(void){
-        TRISC = 0x18;//input rc3 and rc4
-    	SSP1ADD = 0xf9;					/* 100KHz (Fosc = 4MHz) */
-    //	OSCCON = 0b01101010;            // Fosc = 4MHz (Inst. clk = 1MHz)
-        ANSELC = 0x0;					/* No analog inputs req' */
+void configI2C(void){
+	TRISC = 0x18;//input rc3 and rc4
+	SSP1ADD = 0xf9;					/* 100KHz (Fosc = 4MHz) */
+//	OSCCON = 0b01101010;            // Fosc = 4MHz (Inst. clk = 1MHz)
+	ANSELC = 0x0;					/* No analog inputs req' */
 
-        OpenI2C1(MASTER, SLEW_OFF);
-        DisableIntI2C1;
-    }
+	OpenI2C1(MASTER, SLEW_OFF);
+	DisableIntI2C1;
+}
 
-    void configCTMU(void){
-      //CTMUCONH/1 - CTMU Control registers
-      CTMUCONH = 0x00;
-      //make sure CTMU is disabled
-      CTMUCONL = 0x90;
-      //CTMU continues to run when emulator is stopped,CTMU continues
-      //to run in idle mode,Time Generation mode disabled, Edges are blocked
-      //No edge sequence order, Analog current source not grounded, trigger
-      //output disabled, Edge2 polarity = positive level, Edge2 source =
-      //source 0, Edge1 polarity = positive level, Edge1 source = source 0,
-      //CTMUICON - CTMU Current Control Register
-      CTMUICON = 0x01;
-      //0.55uA, Nominal - No Adjustment
-      /**************************************************************************/
-      //Set up AD converter;
-      /**************************************************************************/
-      TRISA=0x04;
-      //set channel 2 as an input
-      // Configure AN2 as an analog channel
-      ANSELAbits.ANSA2=1;
-      TRISAbits.TRISA2=1;
-      // ADCON2
-      ADCON2bits.ADFM=1;
-      ADCON2bits.ACQT=1;
-      ADCON2bits.ADCS=2;
-      // ADCON1
-      ADCON1bits.PVCFG0 =0;
-      ADCON1bits.NVCFG1 =0;
-      // ADCON0
-      ADCON0bits.CHS=2;
-      ADCON0bits.ADON=1;
-    }
+void configCTMU(void){
+  //CTMUCONH/1 - CTMU Control registers
+  CTMUCONH = 0x00;
+  //make sure CTMU is disabled
+  CTMUCONL = 0x90;
+  //CTMU continues to run when emulator is stopped,CTMU continues
+  //to run in idle mode,Time Generation mode disabled, Edges are blocked
+  //No edge sequence order, Analog current source not grounded, trigger
+  //output disabled, Edge2 polarity = positive level, Edge2 source =
+  //source 0, Edge1 polarity = positive level, Edge1 source = source 0,
+  //CTMUICON - CTMU Current Control Register
+  CTMUICON = 0x01;
+  //0.55uA, Nominal - No Adjustment
+  /**************************************************************************/
+  //Set up AD converter;
+  /**************************************************************************/
+  TRISA=0x04;
+  //set channel 2 as an input
+  // Configure AN2 as an analog channel
+  ANSELAbits.ANSA2=1;
+  TRISAbits.TRISA2=1;
+  // ADCON2
+  ADCON2bits.ADFM=1;
+  ADCON2bits.ACQT=1;
+  ADCON2bits.ADCS=2;
+  // ADCON1
+  ADCON1bits.PVCFG0 =0;
+  ADCON1bits.NVCFG1 =0;
+  // ADCON0
+  ADCON0bits.CHS=2;
+  ADCON0bits.ADON=1;
+}
 
-    //function initializiation all components
-    void init(){
+//function initializiation all components
+void init(){
 
-        OSCCONbits.IRCF0 = 0;
-        OSCCONbits.IRCF1 = 1;
-        OSCCONbits.IRCF2 = 1;//freq = 8MGz
+	OSCCONbits.IRCF0 = 0;
+	OSCCONbits.IRCF1 = 1;
+	OSCCONbits.IRCF2 = 1;//freq = 8MGz
 
-        configPorts();
-        configI2C();
-        configCTMU();
+	configPorts();
+	configI2C();
+	configCTMU();
 
-    //    configADC();
-    //    configCTMU();
+//    configADC();
+//    configCTMU();
 
-    }
+}
 
-    //main
-    void main(void) {
-        init();
+//main
+void main(void) {
+	init();
 
-        while(1){
-            measurement();
-            compare();
-            execution();
-            __delay_ms(20);
-        }
-    }
+	while(1){
+		measurement();
+		compare();
+		execution();
+		__delay_ms(20);
+	}
+}
