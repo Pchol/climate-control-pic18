@@ -50,7 +50,7 @@ unsigned int SoT;
 unsigned int SoRh;
 //sht11 required
 
-void measurementTemp(void){
+/*void measurementTemp(void){
 
   float t[2];
   char error = 0;
@@ -87,9 +87,9 @@ void measurementTemp(void){
   StopI2C1();
 
   data.temp = t[0]+(float)0xff/t[1];
-}
+}*/
 
-    void measurementC(void){
+/*    void measurementC(void){
 
       unsigned int Vread=0;
       float voltage;// Vcal=0, CTMUISrc = 0;
@@ -118,7 +118,7 @@ void measurementTemp(void){
 
       voltage = (float)(v*Vread/1023.0);
       data.capacitance = (float)(time*current/voltage - ownCap);//result in pf
-    }
+    }*/
 
 
 void measure(char parametr){
@@ -176,6 +176,7 @@ void calculation(){
 
 }
 
+// измерение влажности воздуха и температуры
 void measurementHumiTemp(){
   measure(MEASURE_TEMP);
   measure(MEASURE_HUMI);
@@ -183,12 +184,13 @@ void measurementHumiTemp(){
 }
 
 void measurement(void){
-  //измерение влажности воздуха
-//      measurementHumiTemp();
+  //измерение влажности воздуха и температуры датчиком sht1x
+      measurementHumiTemp();
+
   //измерение температуры
 //      measurementTemp();
   //измерение влажности почвы
-  measurementC();
+//  measurementC();
 
 }
 
@@ -235,7 +237,7 @@ void configI2C(void){
 	DisableIntI2C1;
 }
 
-void configCTMU(void){
+/*/void configCTMU(void){
   //CTMUCONH/1 - CTMU Control registers
   CTMUCONH = 0x00;
   //make sure CTMU is disabled
@@ -248,9 +250,9 @@ void configCTMU(void){
   //CTMUICON - CTMU Current Control Register
   CTMUICON = 0x01;
   //0.55uA, Nominal - No Adjustment
-  /**************************************************************************/
+  /
   //Set up AD converter;
-  /**************************************************************************/
+  /
   TRISA=0x04;
   //set channel 2 as an input
   // Configure AN2 as an analog channel
@@ -266,7 +268,7 @@ void configCTMU(void){
   // ADCON0
   ADCON0bits.CHS=2;
   ADCON0bits.ADON=1;
-}
+}*/
 
 //function initializiation all components
 void init(){
@@ -277,7 +279,6 @@ void init(){
 
 	configPorts();
 	configI2C();
-	configCTMU();
 
 //    configADC();
 //    configCTMU();
