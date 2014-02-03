@@ -1,9 +1,9 @@
-   #include <stdio.h>
+    #include <stdio.h>
     #include <stdlib.h>
 
     #include "config.h"
     #include <plib/adc.h>
-    #include <plib/ctmu.h>
+//    #include <plib/ctmu.h>
     #include <plib/i2c.h>
 
     #define USE_OR_MASKS
@@ -12,10 +12,13 @@
     //    float adc;
     //    float humidutyWather;
     //    float humidutySoil;
-        float capacitance;
+ //       float capacitance;
         float temp;
         float humi;
         float temp2;
+        unsigned int light;
+        float diod1;
+        float diod2;
     } data;
 
     struct {
@@ -26,6 +29,7 @@
     struct {
         char lampOn;
         char lampOff;
+        signed int move;
     } run;
 
 
@@ -123,7 +127,6 @@ unsigned int SoRh;
 
 void measure(char parametr){
 
-	char error = 0;
 	char checksum;
 	char *uk;
 
@@ -138,33 +141,31 @@ void measure(char parametr){
 	IdleI2C1();
 
 	if (WriteI2C1(parametr) == -2){
-		error = 1;
+		while(1);
 	}
 
-	if (!error){
-		if (parametr == MEASURE_HUMI){
-			__delay_ms(80);
-			uk=(unsigned char)&SoRh;
-		} else if (parametr == MEASURE_TEMP){
-			__delay_ms(80);
-			__delay_ms(80);
-			__delay_ms(80);
-			__delay_ms(80);
-			uk=(unsigned char)&SoT;
-		}
-
-		IdleI2C1();
-		*(uk+1)=ReadI2C1();
-		AckI2C1();
-
-		IdleI2C1();
-		*(uk)=ReadI2C1();
-		AckI2C1();
-
-		IdleI2C1();
-		checksum = ReadI2C1();
-		NotAckI2C1();
+	if (parametr == MEASURE_HUMI){
+		__delay_ms(80);
+		uk=(unsigned char)&SoRh;
+	} else if (parametr == MEASURE_TEMP){
+		__delay_ms(80);
+		__delay_ms(80);
+		__delay_ms(80);
+		__delay_ms(80);
+		uk=(unsigned char)&SoT;
 	}
+
+	IdleI2C1();
+	*(uk+1)=ReadI2C1();
+	AckI2C1();
+
+	IdleI2C1();
+	*(uk)=ReadI2C1();
+	AckI2C1();
+
+	IdleI2C1();
+	checksum = ReadI2C1();
+	NotAckI2C1();
 }
 
 void calculation(){
@@ -183,9 +184,98 @@ void measurementHumiTemp(){
   calculation();
 }
 
+ void measurementLight(void){
+        IdleI2C();
+        StartI2C();
+
+        IdleI2C();
+        if (WriteI2C(0x46) == -2){
+//        if (WriteI2C(0xB8) == -2){
+			//l-level 0xB8
+			//h-level 0x46
+          while(1);
+        }
+
+        IdleI2C();
+        if (WriteI2C(0x13) == -2){
+                //0x10 h-res
+                //0x13 l-res
+        while(1);
+        }
+
+        IdleI2C();
+        StopI2C();
+
+//		__delay_ms(80);
+//		__delay_ms(80);
+        __delay_ms(16);//for l-resolution
+
+        IdleI2C();
+        StartI2C();
+
+        IdleI2C();
+        if (WriteI2C(0x47) == -2){
+//		if (WriteI2C(0xB9) == -2){
+                //l-level 0x47
+                //h-level 0xB9
+                while(1);
+        }
+
+        IdleI2C();
+        data.light = ReadI2C()<<8;
+        AckI2C();
+
+        IdleI2C();
+        data.light |= ReadI2C();
+        NotAckI2C();
+        StopI2C();
+        data.light = (float)data.light/1.2;
+    }
+
+int measurementADC(void){
+  ADRESH=0;//clear the ADC result register
+  ADRESL=0;//clear the ADC result register
+
+  /* Read ADC*/
+  ConvertADC(); // stop sampling and starts adc conversion
+  while(BusyADC()); //wait untill the conversion is completed
+  return ReadADC();//read the result of conversion
+}
+
+void measurementLightDiods(void){
+	SetChanADC(ADC_CH0);
+    data.diod1 = (float)measurementADC()*3.3/1023;
+	__delay_ms(20);
+
+	SetChanADC(ADC_CH1);
+    data.diod2 = (float)measurementADC()*3.3/1023;
+	__delay_ms(20);
+}
+
+void turnPlatform(int deg){
+	static int position;
+	int mov;
+
+	if (deg > 180 && position > 0){
+		deg = 180-deg;
+	}
+	
+	mov = deg-position;
+	position = (deg > 180)?180 - deg:deg;
+}
+
+/*void mLightDirection(){
+	unsigned int i;
+	for (i=0;i<=51;i++){
+
+	}
+}*/
+
 void measurement(void){
   //измерение влажности воздуха и температуры датчиком sht1x
-      measurementHumiTemp();
+//      measurementHumiTemp();
+//      measurementLight();
+      measurementLightDiods();
 
   //измерение температуры
 //      measurementTemp();
@@ -225,6 +315,7 @@ void execution(void){
 void configPorts(void){
 	TRISB = 0;
 //	PORTB = 0;
+	LATBbits.LATB0 = 0;//for ligth sensor h-level address
 }
 
 void configI2C(void){
@@ -269,6 +360,23 @@ void configI2C(void){
   ADCON0bits.CHS=2;
   ADCON0bits.ADON=1;
 }*/
+
+void configADC(){
+
+    TRISA = 0x03;
+
+//	unsigned char config1 = 0, config2 = 0, config3 = 0;
+
+//	config1 = ADC_FOSC_2 | ADC_RIGHT_JUST | ADC_2_TAD;
+//	config2 = ADC_CH0 | ADC_INT_OFF | ADC_REF_VDD_VSS;
+//	config3 = ADC_2ANA;
+
+//todo разобарться с этим
+	ADCON0 = 0b00000001;
+	ADCON1 = 0b00001101;
+	ADCON2 = 0b10001000;
+//	OpenADC(config1, config2, config3);
+}
 
 //function initializiation all components
 void init(){
