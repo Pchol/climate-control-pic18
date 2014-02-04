@@ -15,7 +15,6 @@
  //       float capacitance;
         float temp;
         float humi;
-        float temp2;
         unsigned int light;
         float diod1;
         float diod2;
@@ -24,11 +23,15 @@
     struct {
         char maxTemp;
         char minTemp;
-    } level = {40, 38};
+		char maxHumi;
+		char minHumi;
+    } level = {40, 38, 25, 15};
 
     struct {
         char lampOn;
         char lampOff;
+		char fanOn;
+		char fanOff;
         signed int move;
     } run;
 
@@ -166,11 +169,12 @@ void measure(char parametr){
 	IdleI2C1();
 	checksum = ReadI2C1();
 	NotAckI2C1();
+    StopI2C();
 }
 
 void calculation(){
-	data.temp2=d2*SoT+d1;
-	data.humi=(data.temp2-25)*(T1+T2*SoRh)+C1+C2*SoRh+C3*SoRh*SoRh;
+	data.temp=d2*SoT+d1;
+	data.humi=(data.temp-25)*(T1+T2*SoRh)+C1+C2*SoRh+C3*SoRh*SoRh;
 
 //if(rh_true>100)rh_true=100;       //cut if the value is outside of
 // if(rh_true<0.1)rh_true=0.1;       //the physical possible range
@@ -259,7 +263,6 @@ void turnPlatform(int deg){
 	if (deg > 180 && position > 0){
 		deg = 180-deg;
 	}
-	
 	mov = deg-position;
 	position = (deg > 180)?180 - deg:deg;
 }
@@ -272,11 +275,13 @@ void turnPlatform(int deg){
 }*/
 
 void measurement(void){
-  //измерение влажности воздуха и температуры датчиком sht1x
-//      measurementHumiTemp();
-//      measurementLight();
+	  //измерение освещенности датчиком
+      measurementLight();
+	//  измерение влажности воздуха и температуры датчиком sht1x
+      measurementHumiTemp();
+	  //измерение освещенности диодами
       measurementLightDiods();
-
+	 
   //измерение температуры
 //      measurementTemp();
   //измерение влажности почвы
@@ -292,6 +297,14 @@ char lampBurn(void){
 	}
 }
 
+char fanTurn(void){
+	if (LATCbits.LATC2){
+		return 0xff;
+	} else {
+		return 0;
+	}
+}
+
 void compare(){
 	//сравнение с показаниями и принятие решение какие устройства должны быть включены
 	if (data.temp < level.minTemp && !lampBurn()){
@@ -299,6 +312,13 @@ void compare(){
 	} else if (data.temp > level.maxTemp && lampBurn()){
 		run.lampOff = 0xff;
 	}
+
+	if (data.humi > level.maxHumi && !fanTurn()){
+		run.fanOn = 0xff;
+	} else if(data.humi < level.minHumi && fanTurn()) {
+		run.fanOff = 0xff;
+	}
+
 }
 
 void execution(void){
@@ -310,19 +330,29 @@ void execution(void){
 		LATBbits.LATB5 = 1;
 		run.lampOff = 0x0;
 	}
+
+	if (run.fanOn){
+		LATCbits.LATC2 = 1;
+		run.fanOn = 0x0;
+	} else if (run.fanOff){
+		LATCbits.LATC2 = 0;
+		run.fanOff = 0x0;
+	}
 }
 
 void configPorts(void){
 	TRISB = 0;
-//	PORTB = 0;
+	TRISC = 0;
+//	исоплнительные механизмы
+	LATCbits.LATC2 = 0;//fan default off
 	LATBbits.LATB0 = 0;//for ligth sensor h-level address
 }
 
 void configI2C(void){
 	TRISC = 0x18;//input rc3 and rc4
-	SSP1ADD = 0xf9;					/* 100KHz (Fosc = 4MHz) */
+	SSP1ADD = 0xf9;					// 100KHz (Fosc = 4MHz)
 //	OSCCON = 0b01101010;            // Fosc = 4MHz (Inst. clk = 1MHz)
-	ANSELC = 0x0;					/* No analog inputs req' */
+	ANSELC = 0x0;					// No analog inputs req'
 
 	OpenI2C1(MASTER, SLEW_OFF);
 	DisableIntI2C1;
@@ -373,7 +403,7 @@ void configADC(){
 
 //todo разобарться с этим
 	ADCON0 = 0b00000001;
-	ADCON1 = 0b00001101;
+	ADCON1 = 0b00001111;
 	ADCON2 = 0b10001000;
 //	OpenADC(config1, config2, config3);
 }
@@ -388,7 +418,7 @@ void init(){
 	configPorts();
 	configI2C();
 
-//    configADC();
+    configADC();
 //    configCTMU();
 
 }
