@@ -1,18 +1,19 @@
-    #include <stdio.h>
-    #include <stdlib.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-    #include "config.h"
-    #include <plib/adc.h>
+#include "config.h"
+#include <plib/adc.h>
 //    #include <plib/ctmu.h>
-    #include <plib/i2c.h>
-	#include <plib/timers.h>
+#include <plib/i2c.h>
+#include <plib/timers.h>
 
-    #define USE_OR_MASKS
+#define USE_OR_MASKS
 
-	int timerDeg;
-	unsigned int timer1Deg = 0xF937;
-	char napr;
-    int maxPointPlatform = 36;
+  int timerDeg;
+  unsigned int timer1Deg = 0xF937;
+  char napr;
+  int maxPointPlatform = 36;
+  int currentDeg = 0;
 
     struct {
     //    float adc;
@@ -42,7 +43,104 @@
         signed int move;
     } run;
 
+  void measure(char parametr);
+  void measurementHumiTemp();
+  void measurementLight(void);
+  int measurementADC(void);
+  void measurementLightPlatform(void);
 
+  void init(void);
+  void measurement(void);
+  void compare(void);
+  void execution(void);
+
+  void configPorts(void);
+  void configI2C(void);
+  void configADC(void);
+  void configTimer(void);
+
+  char isLamp(void);
+  int isTurn(void);
+  char isFan(void);
+
+  void interrupt TimerOverflow(void);
+  void turnPlatform(int deg);
+//main
+void main(void) {
+	init();
+	while(1){
+		measurement();
+		compare();
+		execution();
+		__delay_ms(20);
+	}
+}
+
+//function initializiation all components
+void init(void){
+
+	OSCCONbits.IRCF0 = 0;
+	OSCCONbits.IRCF1 = 1;
+	OSCCONbits.IRCF2 = 1;//freq = 8MGz
+
+	ei();
+	configPorts();
+	configI2C();
+
+    configADC();
+	configTimer();
+
+
+//    configCTMU();
+
+}
+
+void compare(void){
+    static int one = 0;
+    if (isTurn() == 0 && currentDeg == 360 && one == 0){
+            data.turnDeg = -(360 - maxValue()*10);
+            one = 1;
+    }
+
+    //сравнение с показаниями и принятие решение какие устройства должны быть включены
+    if (data.temp < level.minTemp && !isLamp()){
+            run.lampOn = 0xff;
+    } else if (data.temp > level.maxTemp && isLamp()){
+            run.lampOff = 0xff;
+    }
+
+    if (data.humi > level.maxHumi && !isFan()){
+            run.fanOn = 0xff;
+    } else if(data.humi < level.minHumi && isFan()) {
+            run.fanOff = 0xff;
+    }
+}
+
+void execution(void){
+
+	if (data.turnDeg != 0 && isTurn() == 0){
+		turnPlatform(data.turnDeg);//
+		data.turnDeg = 0;
+	}
+	/*//исполнение
+	if (run.lampOn){
+		LATBbits.LATB5 = 0;
+		run.lampOn = 0x0;
+	} else if (run.lampOff){
+		LATBbits.LATB5 = 1;
+		run.lampOff = 0x0;
+	}
+
+	if (run.fanOn){
+		LATCbits.LATC2 = 1;
+		run.fanOn = 0x0;
+	} else if (run.fanOff){
+		LATCbits.LATC2 = 0;
+		run.fanOff = 0x0;
+	}*/
+}
+
+//measurement block
 
 //sht11 required
 //
@@ -65,6 +163,8 @@ unsigned int SoT;
 unsigned int SoRh;
 //sht11 required
 
+// measurement block
+//
 /*void measurementTemp(void){
 
   float t[2];
@@ -135,21 +235,7 @@ unsigned int SoRh;
       data.capacitance = (float)(time*current/voltage - ownCap);//result in pf
     }*/
 
-
-int isTurn(void){
-	if (!LATBbits.LATB4 && LATBbits.LATB2){
-		return 1;
-	} else if (!LATBbits.LATB2 && LATBbits.LATB4){
-		return 2;
-	} else if(!LATBbits.LATB2 && !LATBbits.LATB4){
-		return -1;
-	} else {
-		return 0;
-	}
-}
-
-void measure(char parametr){
-
+void measure(char parametr){ 
 	char checksum;
 	char *uk;
 
@@ -192,7 +278,7 @@ void measure(char parametr){
     StopI2C();
 }
 
-void calculation(){
+void calculation(void){
 	data.temp=d2*SoT+d1;
 	data.humi=(data.temp-25)*(T1+T2*SoRh)+C1+C2*SoRh+C3*SoRh*SoRh;
 
@@ -201,8 +287,44 @@ void calculation(){
 
 }
 
+void measurementLightPlatform(void){
+	if (currentDeg != 360){
+		SetChanADC(ADC_CH0);
+		data.diod1[currentDeg/10] = (float)measurementADC()*3.3/1023;
+		__delay_ms(20);
+
+		SetChanADC(ADC_CH1);
+		data.diod2[currentDeg/10] = (float)measurementADC()*3.3/1023;
+		__delay_ms(20);
+
+		turnPlatform(10);
+		currentDeg += 10;
+	}
+}
+
+void measurement(void){
+	  //измерение освещенности датчиком
+//      measurementLight();
+	//  измерение влажности воздуха и температуры датчиком sht1x
+//      measurementHumiTemp();
+	  //измерение освещенности диодами
+     if (isTurn() == 0 && currentDeg != 360){
+		measurementLightPlatform();
+//		 currentDeg = 360;
+//		 data.diod1[35] = 1;
+	 } 
+
+//	    measurementLightDiods();
+	 
+  //измерение температуры
+//      measurementTemp();
+  //измерение влажности почвы
+//  measurementC();
+
+}
+
 // измерение влажности воздуха и температуры
-void measurementHumiTemp(){
+void measurementHumiTemp(void){
   measure(MEASURE_TEMP);
   measure(MEASURE_HUMI);
   calculation();
@@ -276,8 +398,23 @@ int measurementADC(void){
 	__delay_ms(20);
 }
  */
+//
+// measurement block
 
-void interrupt TimerOverflow(){
+//turn platform
+int isTurn(void){
+	if (!LATBbits.LATB4 && LATBbits.LATB2){
+		return 1;
+	} else if (!LATBbits.LATB2 && LATBbits.LATB4){
+		return 2;
+	} else if(!LATBbits.LATB2 && !LATBbits.LATB4){
+		return -1;
+	} else {
+		return 0;
+	}
+}
+
+void interrupt TimerOverflow(void){
 	if (INTCONbits.TMR0IF == 1){
 //		if (timerDeg == 0 && (isTurn() == 1 || isTurn() == 2)){
 //			LATBbits.LATB2 = 1;
@@ -317,67 +454,6 @@ void turnPlatform(int deg){
 	INTCONbits.TMR0IF = 0;
 }
 
-/*void mLightDirection(){
-	unsigned int i;
-	for (i=0;i<=51;i++){
-
-	}
-}*/
-
-int currentDeg = 0;
-
-void measurementLightPlatform(void){
-	if (currentDeg != 360){
-		SetChanADC(ADC_CH0);
-		data.diod1[currentDeg/10] = (float)measurementADC()*3.3/1023;
-		__delay_ms(20);
-
-		SetChanADC(ADC_CH1);
-		data.diod2[currentDeg/10] = (float)measurementADC()*3.3/1023;
-		__delay_ms(20);
-
-		turnPlatform(10);
-		currentDeg += 10;
-	}
-}
-
-void measurement(void){
-	  //измерение освещенности датчиком
-//      measurementLight();
-	//  измерение влажности воздуха и температуры датчиком sht1x
-//      measurementHumiTemp();
-	  //измерение освещенности диодами
-     if (isTurn() == 0 && currentDeg != 360){
-		measurementLightPlatform();
-//		 currentDeg = 360;
-//		 data.diod1[35] = 1;
-	 } 
-
-//	    measurementLightDiods();
-	 
-  //измерение температуры
-//      measurementTemp();
-  //измерение влажности почвы
-//  measurementC();
-
-}
-
-char lampBurn(void){
-	if (!LATBbits.LATB5){
-		return 0xff;
-	} else {
-		return 0;
-	}
-}
-
-char fanTurn(void){
-	if (LATCbits.LATC2){
-		return 0xff;
-	} else {
-		return 0;
-	}
-}
-
 int maxValue(void){
 	int i;
 	int val=0;
@@ -390,54 +466,27 @@ int maxValue(void){
 	}
 	return result;
 }
+//turn platform
 
-void compare(){
-
-	static int one = 0;
-	if (isTurn() == 0 && currentDeg == 360 && one == 0){
-		data.turnDeg = -(360 - maxValue()*10);
-		one = 1;
+//check lamp is burn
+char isLamp(void){
+	if (!LATBbits.LATB5){
+		return 0xff;
+	} else {
+		return 0;
 	}
-
-	//сравнение с показаниями и принятие решение какие устройства должны быть включены
-	if (data.temp < level.minTemp && !lampBurn()){
-		run.lampOn = 0xff;
-	} else if (data.temp > level.maxTemp && lampBurn()){
-		run.lampOff = 0xff;
-	}
-
-	if (data.humi > level.maxHumi && !fanTurn()){
-		run.fanOn = 0xff;
-	} else if(data.humi < level.minHumi && fanTurn()) {
-		run.fanOff = 0xff;
-	}
-
 }
 
-void execution(void){
-
-	if (data.turnDeg != 0 && isTurn() == 0){
-		turnPlatform(data.turnDeg);//
-		data.turnDeg = 0;
+//fan
+char isFan(void){
+	if (LATCbits.LATC2){
+		return 0xff;
+	} else {
+		return 0;
 	}
-	/*//исполнение
-	if (run.lampOn){
-		LATBbits.LATB5 = 0;
-		run.lampOn = 0x0;
-	} else if (run.lampOff){
-		LATBbits.LATB5 = 1;
-		run.lampOff = 0x0;
-	}
-
-	if (run.fanOn){
-		LATCbits.LATC2 = 1;
-		run.fanOn = 0x0;
-	} else if (run.fanOff){
-		LATCbits.LATC2 = 0;
-		run.fanOff = 0x0;
-	}*/
 }
 
+//config
 void configPorts(void){
 	TRISB = 0;//all output
 	TRISC = 0;//
@@ -460,7 +509,7 @@ void configI2C(void){
 	DisableIntI2C1;
 }
 
-/*/void configCTMU(void){
+/*void configCTMU(void){
   //CTMUCONH/1 - CTMU Control registers
   CTMUCONH = 0x00;
   //make sure CTMU is disabled
@@ -493,7 +542,7 @@ void configI2C(void){
   ADCON0bits.ADON=1;
 }*/
 
-void configADC(){
+void configADC(void){
 
     TRISA = 0x03;
 
@@ -527,33 +576,4 @@ void configTimer(void){
 
 //	OpenTimer0();
 }
-
-//function initializiation all components
-void init(){
-
-	OSCCONbits.IRCF0 = 0;
-	OSCCONbits.IRCF1 = 1;
-	OSCCONbits.IRCF2 = 1;//freq = 8MGz
-
-	ei();
-	configPorts();
-	configI2C();
-
-    configADC();
-	configTimer();
-
-
-//    configCTMU();
-
-}
-
-//main
-void main(void) {
-	init();
-	while(1){
-		measurement();
-		compare();
-		execution();
-		__delay_ms(20);
-	}
-}
+//config
