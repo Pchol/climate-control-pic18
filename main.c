@@ -96,8 +96,8 @@ void init(void){
     configADC();
 	configTimer();
 
-    data.lightPlatform.maxDeg = 360;
-    data.lightPlatform.iterationDeg = 10;
+    data.lightPlatform.maxDeg = 10;
+    data.lightPlatform.iterationDeg = 1;
     data.lightPlatform.closeMeasurement = 1;
 
 //    configCTMU();
@@ -150,7 +150,7 @@ void compare(void){
 void execution(void){
 
 	if (run.move){
-		turnPlatform(360 - data.degMaxLight);//
+		turnPlatform(-(data.lightPlatform.maxDeg - data.degMaxLight));//
 		run.move = 0;
 	}
 	/*//исполнение
@@ -337,7 +337,7 @@ void mLightPlatform(void){
 		currentDeg += data.lightPlatform.iterationDeg;
     } else if (!data.lightPlatform.closeMeasurement){ // окончание
         data.lightPlatform.closeMeasurement = 1;
-		data.degMaxLight = calculateDeg();
+		data.degMaxLight = (int)calculateDeg()*data.lightPlatform.iterationDeg;
     }
 }
 
@@ -410,11 +410,11 @@ int mADC(void){
 //turn platform
 //return 1 - left, 2 - right, 3 - wait 1 sec after, -1 error, 0 - free
 int isTurn(void){
-	if (!LATBbits.LATB4 && LATBbits.LATB2){
+	if (!LATBbits.LATB4 && LATBbits.LATB3){
 		return 1;
-	} else if (!LATBbits.LATB2 && LATBbits.LATB4){
+	} else if (!LATBbits.LATB3 && LATBbits.LATB4){
 		return 2;
-	} else if(!LATBbits.LATB2 && !LATBbits.LATB4){
+	} else if(!LATBbits.LATB3 && !LATBbits.LATB4){
 		return -1;
     } else if (waitTurn == 1){
         return 3;
@@ -431,15 +431,16 @@ void interrupt TimerOverflow(void){
 			WriteTimer0(timer1Deg);
 		} else if (timerDeg < 0 && isTurn() != 1 && isTurn() != 3) {
 			timerDeg++;
-			LATBbits.LATB2 = 0;
+			LATBbits.LATB3 = 0;
 			WriteTimer0(timer1Deg);
         } else {//off
-            if (isTurn() != 3){
+            if (isTurn() == 3){//заканчиваем вращение
                 waitTurn = 0;
-            } else {
+            } else {//выключаем и ждем 1 сек
 				LATBbits.LATB4 = 1;
-				LATBbits.LATB2 = 1;
+				LATBbits.LATB3 = 1;
 				waitTurn = 1;
+				WriteTimer0(timer1Deg);
             }
             //todo возможно стоит добавить задержку, ибо инерционность)
 		}
@@ -455,7 +456,7 @@ int turnPlatform(int deg){
 	//(4*256)/8×106 = 128uS
 	//1/128uS = 7813 - 1s
    //организовать стек?
-    if (!LATBbits.LATB4 || !LATBbits.LATB2){
+    if (!LATBbits.LATB4 || !LATBbits.LATB3){
         return 0;
     }
 	timerDeg = deg;
@@ -463,9 +464,9 @@ int turnPlatform(int deg){
 	if (timerDeg > 0){
 		LATBbits.LATB4 = 0;
 	} else if (timerDeg < 0){
-		LATBbits.LATB2 = 0;
+		LATBbits.LATB3 = 0;
 	} 
-//	WriteTimer0(0xfffe);
+	WriteTimer0(0xfffe);
 	INTCONbits.TMR0IF = 0;
     return 1;
 }
@@ -474,13 +475,13 @@ int calculateDeg(void){
 	int i;
 	int val=0;
 	int result=0;
-	for (i = 0; i < 36; i++){
+	for (i = 0; i < data.lightPlatform.maxDeg/data.lightPlatform.iterationDeg; i++){
 		if (data.lightPlatform.diod1[i] > val){
 			val = data.lightPlatform.diod1[i];
 			result = i;
 		}
 	}
-	return result;
+	return result+1;
 }
 //turn platform
 
@@ -508,11 +509,11 @@ void configPorts(void){
 	TRISC = 0;//
 //	исоплнительные механизмы
 	LATCbits.LATC2 = 0;//fan default off
+
 	LATBbits.LATB0 = 0;//for ligth sensor h-level address
-
-	LATBbits.LATB2 = 1;
+	LATBbits.LATB3 = 1;//turn platform default stay
 	LATBbits.LATB4 = 1;
-
+    LATBbits.LATB1 = 1; //pump default off
 }
 
 void configI2C(void){
