@@ -29,9 +29,8 @@
 			float diod1[36];
 			float diod2[36];
         } lightPlatform;
-    } data;
+	} data = {0, 0, 0, 0, {360, 10, 1}};
 
-//{360, 10, 1}
     struct {
         char maxTemp;
         char minTemp;
@@ -95,10 +94,6 @@ void init(void){
 
     configADC();
 	configTimer();
-
-    data.lightPlatform.maxDeg = 10;
-    data.lightPlatform.iterationDeg = 1;
-    data.lightPlatform.closeMeasurement = 1;
 
 //    configCTMU();
 
