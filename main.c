@@ -9,9 +9,12 @@
 
 #define USE_OR_MASKS
 
+//int timer1Sec = 0xE17B;
+int timer05sec = 0x7A12;
+int timer1Deg = 0xF937;
+
   int  waitTurn = 0;
   int timerDeg;
-  unsigned int timer1Deg = 0xF937;
 
     struct {
     //    float adc;
@@ -43,8 +46,24 @@
         char lampOff;
 		char fanOn;
 		char fanOff;
+		int dumpOn;
+		int dumpOff;
         signed int move;
     } run;
+	
+	struct {
+		struct {
+			int time;
+			int on;
+			int complete;
+		} light;
+		
+		struct {
+			int time;
+			int on;
+			int complete;
+		} dump;
+	} event;
 
   void measure(char parametr);
   void mHumiTemp(void);
@@ -60,13 +79,14 @@
   void configPorts(void);
   void configI2C(void);
   void configADC(void);
-  void configTimer(void);
+  void configTimers(void);
 
   int isLamp(void);
   int isTurn(void);
   int isFan(void);
+  int isDump(void);
 
-  void interrupt TimerOverflow(void);
+  void interrupt oneSecInterupt(void);
   int turnPlatform(int deg);
 
 //main
@@ -95,7 +115,7 @@ void init(void){
 	configI2C();
 
     configADC();
-	configTimer();
+	configTimers();
 
 //    configCTMU();
 
@@ -108,10 +128,10 @@ void measurement(void){
 	//  измерение влажности воздуха и температуры датчиком sht1x
 //      mHumiTemp();
 	  //измерение освещенности диодами
-     if (!isTurn() && (!data.lightPlatform.closeMeasurement || one)){
-		mLightPlatform();
-        one = 0;
-	 }
+//     if (!isTurn() && (!data.lightPlatform.closeMeasurement || one)){
+//		mLightPlatform();
+//        one = 0;
+//	 }
 
 //	    measurementLightDiods();
 
@@ -146,10 +166,12 @@ void compare(void){
 
 void execution(void){
 
+	/*
 	if (run.move){
 		turnPlatform(-(data.lightPlatform.maxDeg - data.degMaxLight));//
 		run.move = 0;
-	}
+	}*/
+
 	/*//исполнение
 	if (run.lampOn){
 		LATBbits.LATB5 = 0;
@@ -165,6 +187,13 @@ void execution(void){
 	} else if (run.fanOff){
 		LATCbits.LATC2 = 0;
 		run.fanOff = 0x0;
+	}*/
+
+	/*
+	if (run.dumpOn && !isDump()){
+		LATBbits.LATB1 = 0;
+	} else if (run.dumpOff && isDump()){
+		LATBbits.LATB1 = 1;
 	}*/
 }
 
@@ -320,6 +349,7 @@ void mLightPlatform(void){
     if (data.lightPlatform.closeMeasurement == 1){//запуск
         data.lightPlatform.closeMeasurement = 0;
         currentDeg = 0;
+		turnPlatform(data.lightPlatform.maxDeg);
     }
 	if (currentDeg != data.lightPlatform.maxDeg){
 		SetChanADC(ADC_CH0);
@@ -330,7 +360,7 @@ void mLightPlatform(void){
 		data.lightPlatform.diod2[currentDeg/data.lightPlatform.iterationDeg] = (float)mADC()*3.3/1023;
 		__delay_ms(20);
 
-		turnPlatform(data.lightPlatform.iterationDeg);
+//		turnPlatform(data.lightPlatform.iterationDeg);
 		currentDeg += data.lightPlatform.iterationDeg;
     } else if (!data.lightPlatform.closeMeasurement){ // окончание
         data.lightPlatform.closeMeasurement = 1;
@@ -420,30 +450,51 @@ int isTurn(void){
 	}
 }
 
-void interrupt TimerOverflow(void){
+void interrupt oneSecInterupt(void){
 	if (INTCONbits.TMR0IF == 1){
-		if (timerDeg > 0 && isTurn() != 2 && isTurn() != 3){
-			timerDeg--;
-			LATBbits.LATB4 = 0;
-			WriteTimer0(timer1Deg);
-		} else if (timerDeg < 0 && isTurn() != 1 && isTurn() != 3) {
-			timerDeg++;
-			LATBbits.LATB3 = 0;
-			WriteTimer0(timer1Deg);
-        } else {//off
-            if (isTurn() == 3){//заканчиваем вращение
-                waitTurn = 0;
-            } else {//выключаем и ждем 1 сек
-				LATBbits.LATB4 = 1;
-				LATBbits.LATB3 = 1;
-				waitTurn = 1;
-				WriteTimer0(timer1Deg);
-            }
-            //todo возможно стоит добавить задержку, ибо инерционность)
+//таймер на 1 секунду
+	if (event.light.on){//проводятся измерение освещенности (движ двиг)
+		event.light.time--;
+		if (!event.light.time){
+			event.light.complete = 1;
+			event.light.on = 0;
 		}
-		INTCONbits.TMR0IF = 0;
+//			LATBbits.LATB4 = 0;
+//			if (isTurn() == 3){//заканчиваем вращение
+//				waitTurn = 0;
+//			} else {//выключаем и ждем 1 сек
+//				LATBbits.LATB4 = 1;
+//				LATBbits.LATB3 = 1;
+//				waitTurn = 1;
 	}
+
+	if (event.dump.on){
+		event.dump.time--;
+		if (!event.dump.time){
+			//делаем включение насоса
+//			event.dump.time = 0xff;
+			event.dump.complete;
+		}
+	}
+
+	WriteTimer0(timer1Deg);
+	INTCONbits.TMR0IF = 0;
+	}
+/*
+	static int i = 20;
+	if (PIR1bits.TMR1IF){
+		i--;
+		if (!i){
+
+			LATBbits.LATB5 = ~LATBbits.LATB5;
+			i = 20;
+		}
+		WriteTimer3(timer05sec);
+		PIR1bits.TMR1IF = 0;
+	}
+*/
 }
+
 
 int turnPlatform(int deg){
 //	int mov;
@@ -502,6 +553,13 @@ int isFan(void){
 	}
 }
 
+int isDump(void){
+	if (!LATBbits.LATB1){
+		return 1;
+	} else {
+		return 0;
+	}
+}
 //config
 void configPorts(void){
 	TRISB = 0;//all output
@@ -575,9 +633,9 @@ void configADC(void){
 //	OpenADC(config1, config2, config3);
 }
 
-void configTimer(void){
+void configTimers(void){
 
-	T0CONbits.TMR0ON = 1;//enables timer
+	T0CONbits.TMR0ON = 0;//enables timer
 	T0CONbits.T08BIT = 0;//1 - 8bit 0 - 16 bit
 	T0CONbits.PSA = 0;
 	T0CONbits.T0PS0 = 1;//1:256
@@ -585,10 +643,26 @@ void configTimer(void){
 	T0CONbits.T0PS2 = 1;
 	T0CONbits.T0CS = 0;//internal
 
-	TMR0H = 0;//reset
-	TMR0L = 0;
-
+//	TMR0H = 0;//reset
+//	TMR0L = 0;
 	INTCONbits.TMR0IE = 1;//ienable timer0 overflow interrupt
-
+	WriteTimer0(timer1Deg);
 //	OpenTimer0();
+
+	/*
+	T1CONbits.TMR1CS0 = 0;//fosc/4
+	T1CONbits.TMR1CS0 = 0;
+
+	T1CONbits.T1CKPS0 = 1; //prescale 1:8
+	T1CONbits.T1CKPS1 = 1;
+
+	T1CONbits.T1RD16 = 1;//16bit
+	T1CONbits.TMR1ON = 1;//on
+	PIE1bits.TMR1IE = 1;
+	INTCONbits.PEIE = 1;
+
+//	T1CONbits.T1SYNC = 1;
+//	T1CONbits.T1SOSCEN = 1;//secondary oscilator
+	WriteTimer0(timer05sec);
+	 */
 }
