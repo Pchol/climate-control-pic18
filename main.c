@@ -73,6 +73,8 @@
 void main(void) {
 
 	init();
+
+//	turnPlatform(-90);
 	while(1){
 		measurement();
 		compare();
@@ -470,9 +472,11 @@ int calculateDeg(void){
 	int i;
 	float val=0;
 	int result=0;
+	float sum = 0;
 	for (i = 0; i < (int)(data.lightPlatform.maxDeg/data.lightPlatform.iterationDeg); i++){
-		if (data.lightPlatform.diod1[i] > val){
-			val = data.lightPlatform.diod1[i];
+		sum = data.lightPlatform.diod1[i] + data.lightPlatform.diod2[i];
+		if (sum > val){
+			val = sum;
 			result = i;
 		}
 	}
