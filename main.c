@@ -5,8 +5,14 @@
     #include <plib/adc.h>
 //    #include <plib/ctmu.h>
     #include <plib/i2c.h>
+	#include <plib/timers.h>
 
     #define USE_OR_MASKS
+
+	int timerDeg;
+	unsigned int timer1Deg = 0xF937;
+	char napr;
+    int maxPointPlatform = 36;
 
     struct {
     //    float adc;
@@ -16,8 +22,9 @@
         float temp;
         float humi;
         unsigned int light;
-        float diod1;
-        float diod2;
+        float diod1[36];
+        float diod2[36];
+        int turnDeg;
     } data;
 
     struct {
@@ -34,6 +41,7 @@
 		char fanOff;
         signed int move;
     } run;
+
 
 
 //sht11 required
@@ -127,6 +135,18 @@ unsigned int SoRh;
       data.capacitance = (float)(time*current/voltage - ownCap);//result in pf
     }*/
 
+
+int isTurn(void){
+	if (!LATBbits.LATB4 && LATBbits.LATB2){
+		return 1;
+	} else if (!LATBbits.LATB2 && LATBbits.LATB4){
+		return 2;
+	} else if(!LATBbits.LATB2 && !LATBbits.LATB4){
+		return -1;
+	} else {
+		return 0;
+	}
+}
 
 void measure(char parametr){
 
@@ -246,7 +266,7 @@ int measurementADC(void){
   return ReadADC();//read the result of conversion
 }
 
-void measurementLightDiods(void){
+/*void measurementLightDiods(void){
 	SetChanADC(ADC_CH0);
     data.diod1 = (float)measurementADC()*3.3/1023;
 	__delay_ms(20);
@@ -255,16 +275,46 @@ void measurementLightDiods(void){
     data.diod2 = (float)measurementADC()*3.3/1023;
 	__delay_ms(20);
 }
+ */
+
+void interrupt TimerOverflow(){
+	if (INTCONbits.TMR0IF == 1){
+//		if (timerDeg == 0 && (isTurn() == 1 || isTurn() == 2)){
+//			LATBbits.LATB2 = 1;
+//			LATBbits.LATB4 = 1;
+//		} else
+		if (timerDeg > 0 && isTurn() != 2){
+			timerDeg--;
+			LATBbits.LATB4 = 0;
+			WriteTimer0(timer1Deg);
+		} else if (timerDeg < 0 && isTurn() != 1) {
+			timerDeg++;
+			LATBbits.LATB2 = 0;
+			WriteTimer0(timer1Deg);
+		} else {//off
+            LATBbits.LATB4 = 1;
+            LATBbits.LATB2 = 1;
+            //todo возможно стоит добавить задержку, ибо инерционность)
+		}
+		INTCONbits.TMR0IF = 0;
+	}
+}
 
 void turnPlatform(int deg){
-	static int position;
-	int mov;
-
-	if (deg > 180 && position > 0){
-		deg = 180-deg;
-	}
-	mov = deg-position;
-	position = (deg > 180)?180 - deg:deg;
+//	int mov;
+//	unsigned int time = 0xE17B;//1 sec
+//	unsigned int time = 0x0BD7;
+//	unsigned int time = 0xA470;//3 sec
+	//(4*256)/8×106 = 128uS
+	//1/128uS = 7813 - 1s
+	timerDeg = deg;
+	if (timerDeg > 0){
+		LATBbits.LATB4 = 0;
+	} else if (timerDeg < 0){
+		LATBbits.LATB2 = 0;
+	} 
+	WriteTimer0(0xfffe);
+	INTCONbits.TMR0IF = 0;
 }
 
 /*void mLightDirection(){
@@ -274,13 +324,36 @@ void turnPlatform(int deg){
 	}
 }*/
 
+int currentDeg = 0;
+
+void measurementLightPlatform(void){
+	if (currentDeg != 360){
+		SetChanADC(ADC_CH0);
+		data.diod1[currentDeg/10] = (float)measurementADC()*3.3/1023;
+		__delay_ms(20);
+
+		SetChanADC(ADC_CH1);
+		data.diod2[currentDeg/10] = (float)measurementADC()*3.3/1023;
+		__delay_ms(20);
+
+		turnPlatform(10);
+		currentDeg += 10;
+	}
+}
+
 void measurement(void){
 	  //измерение освещенности датчиком
-      measurementLight();
+//      measurementLight();
 	//  измерение влажности воздуха и температуры датчиком sht1x
-      measurementHumiTemp();
+//      measurementHumiTemp();
 	  //измерение освещенности диодами
-      measurementLightDiods();
+     if (isTurn() == 0 && currentDeg != 360){
+		measurementLightPlatform();
+//		 currentDeg = 360;
+//		 data.diod1[35] = 1;
+	 } 
+
+//	    measurementLightDiods();
 	 
   //измерение температуры
 //      measurementTemp();
@@ -305,7 +378,27 @@ char fanTurn(void){
 	}
 }
 
+int maxValue(void){
+	int i;
+	int val=0;
+	int result=0;
+	for (i = 0; i < 36; i++){
+		if (data.diod1[i] > val){
+			val = data.diod1[i];
+			result = i;
+		}
+	}
+	return result;
+}
+
 void compare(){
+
+	static int one = 0;
+	if (isTurn() == 0 && currentDeg == 360 && one == 0){
+		data.turnDeg = -(360 - maxValue()*10);
+		one = 1;
+	}
+
 	//сравнение с показаниями и принятие решение какие устройства должны быть включены
 	if (data.temp < level.minTemp && !lampBurn()){
 		run.lampOn = 0xff;
@@ -322,7 +415,12 @@ void compare(){
 }
 
 void execution(void){
-	//исполнение
+
+	if (data.turnDeg != 0 && isTurn() == 0){
+		turnPlatform(data.turnDeg);//
+		data.turnDeg = 0;
+	}
+	/*//исполнение
 	if (run.lampOn){
 		LATBbits.LATB5 = 0;
 		run.lampOn = 0x0;
@@ -337,15 +435,19 @@ void execution(void){
 	} else if (run.fanOff){
 		LATCbits.LATC2 = 0;
 		run.fanOff = 0x0;
-	}
+	}*/
 }
 
 void configPorts(void){
-	TRISB = 0;
-	TRISC = 0;
+	TRISB = 0;//all output
+	TRISC = 0;//
 //	исоплнительные механизмы
 	LATCbits.LATC2 = 0;//fan default off
 	LATBbits.LATB0 = 0;//for ligth sensor h-level address
+
+	LATBbits.LATB2 = 1;
+	LATBbits.LATB4 = 1;
+
 }
 
 void configI2C(void){
@@ -408,6 +510,24 @@ void configADC(){
 //	OpenADC(config1, config2, config3);
 }
 
+void configTimer(void){
+
+	T0CONbits.TMR0ON = 1;//enables timer
+	T0CONbits.T08BIT = 0;//1 - 8bit 0 - 16 bit
+	T0CONbits.PSA = 0;
+	T0CONbits.T0PS0 = 1;//1:256
+	T0CONbits.T0PS1 = 1;
+	T0CONbits.T0PS2 = 1;
+	T0CONbits.T0CS = 0;//internal
+
+	TMR0H = 0;//reset
+	TMR0L = 0;
+
+	INTCONbits.TMR0IE = 1;//ienable timer0 overflow interrupt
+
+//	OpenTimer0();
+}
+
 //function initializiation all components
 void init(){
 
@@ -415,10 +535,14 @@ void init(){
 	OSCCONbits.IRCF1 = 1;
 	OSCCONbits.IRCF2 = 1;//freq = 8MGz
 
+	ei();
 	configPorts();
 	configI2C();
 
     configADC();
+	configTimer();
+
+
 //    configCTMU();
 
 }
@@ -426,7 +550,6 @@ void init(){
 //main
 void main(void) {
 	init();
-
 	while(1){
 		measurement();
 		compare();
