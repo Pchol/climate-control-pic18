@@ -9,11 +9,9 @@
 
 #define USE_OR_MASKS
 
+  int  waitTurn = 0;
   int timerDeg;
   unsigned int timer1Deg = 0xF937;
-  char napr;
-  int maxPointPlatform = 36;
-  int currentDeg = 0;
 
     struct {
     //    float adc;
@@ -23,11 +21,17 @@
         float temp;
         float humi;
         unsigned int light;
-        float diod1[36];
-        float diod2[36];
-        int turnDeg;
+        int degMaxLight;
+	    struct {
+			int maxDeg;
+			int iterationDeg;
+            int closeMeasurement;
+			float diod1[36];
+			float diod2[36];
+        } lightPlatform;
     } data;
 
+//{360, 10, 1}
     struct {
         char maxTemp;
         char minTemp;
@@ -44,10 +48,10 @@
     } run;
 
   void measure(char parametr);
-  void measurementHumiTemp(void);
-  void measurementLight(void);
-  int measurementADC(void);
-  void measurementLightPlatform(void);
+  void mHumiTemp(void);
+  void mLight(void);
+  int mADC(void);
+  void mLightPlatform(void);
 
   void init(void);
   void measurement(void);
@@ -64,9 +68,11 @@
   int isFan(void);
 
   void interrupt TimerOverflow(void);
-  void turnPlatform(int deg);
+  int turnPlatform(int deg);
+
 //main
 void main(void) {
+
 	init();
 	while(1){
 		measurement();
@@ -90,18 +96,42 @@ void init(void){
     configADC();
 	configTimer();
 
+    data.lightPlatform.maxDeg = 360;
+    data.lightPlatform.iterationDeg = 10;
+    data.lightPlatform.closeMeasurement = 1;
 
 //    configCTMU();
 
 }
 
+void measurement(void){
+	static int one = 1;
+	  //измерение освещенности датчиком
+//      mLight();
+	//  измерение влажности воздуха и температуры датчиком sht1x
+//      mHumiTemp();
+	  //измерение освещенности диодами
+     if (!isTurn() && (!data.lightPlatform.closeMeasurement || one)){
+		mLightPlatform();
+        one = 0;
+	 }
+
+//	    measurementLightDiods();
+
+  //измерение температуры
+//      measurementTemp();
+  //измерение влажности почвы
+//  measurementC();
+
+}
+
 void compare(void){
     static int one = 0;
-    if (isTurn() == 0 && currentDeg == 360 && one == 0){
-            data.turnDeg = -(360 - maxValue()*10);
-            one = 1;
+    if (!isTurn() && data.lightPlatform.closeMeasurement && !one){
+        run.move = 1;
+		one = 1;
     }
-
+/*
     //сравнение с показаниями и принятие решение какие устройства должны быть включены
     if (data.temp < level.minTemp && !isLamp()){
             run.lampOn = 1;
@@ -114,13 +144,14 @@ void compare(void){
     } else if(data.humi < level.minHumi && isFan()) {
             run.fanOff = 1;
     }
+ */
 }
 
 void execution(void){
 
-	if (data.turnDeg != 0 && isTurn() == 0){
-		turnPlatform(data.turnDeg);//
-		data.turnDeg = 0;
+	if (run.move){
+		turnPlatform(360 - data.degMaxLight);//
+		run.move = 0;
 	}
 	/*//исполнение
 	if (run.lampOn){
@@ -285,51 +316,39 @@ void calculation(void){
 // if(rh_true<0.1)rh_true=0.1;       //the physical possible range
 
 }
+//подпрограмма измерения макс угла освещенности
+void mLightPlatform(void){
+   	static int currentDeg = 0;
 
-void measurementLightPlatform(void){
-	if (currentDeg != 360){
+    if (data.lightPlatform.closeMeasurement == 1){//запуск
+        data.lightPlatform.closeMeasurement = 0;
+        currentDeg = 0;
+    }
+	if (currentDeg != data.lightPlatform.maxDeg){
 		SetChanADC(ADC_CH0);
-		data.diod1[currentDeg/10] = (float)measurementADC()*3.3/1023;
+		data.lightPlatform.diod1[currentDeg/data.lightPlatform.iterationDeg] = (float)mADC()*3.3/1023;
 		__delay_ms(20);
 
 		SetChanADC(ADC_CH1);
-		data.diod2[currentDeg/10] = (float)measurementADC()*3.3/1023;
+		data.lightPlatform.diod2[currentDeg/data.lightPlatform.iterationDeg] = (float)mADC()*3.3/1023;
 		__delay_ms(20);
 
-		turnPlatform(10);
-		currentDeg += 10;
-	}
-}
-
-void measurement(void){
-	  //измерение освещенности датчиком
-//      measurementLight();
-	//  измерение влажности воздуха и температуры датчиком sht1x
-//      measurementHumiTemp();
-	  //измерение освещенности диодами
-     if (isTurn() == 0 && currentDeg != 360){
-		measurementLightPlatform();
-//		 currentDeg = 360;
-//		 data.diod1[35] = 1;
-	 } 
-
-//	    measurementLightDiods();
-	 
-  //измерение температуры
-//      measurementTemp();
-  //измерение влажности почвы
-//  measurementC();
-
+		turnPlatform(data.lightPlatform.iterationDeg);
+		currentDeg += data.lightPlatform.iterationDeg;
+    } else if (!data.lightPlatform.closeMeasurement){ // окончание
+        data.lightPlatform.closeMeasurement = 1;
+		data.degMaxLight = calculateDeg();
+    }
 }
 
 // измерение влажности воздуха и температуры
-void measurementHumiTemp(void){
+void mHumiTemp(void){
   measure(MEASURE_TEMP);
   measure(MEASURE_HUMI);
   calculation();
 }
 
- void measurementLight(void){
+void mLight(void){
         IdleI2C();
         StartI2C();
 
@@ -377,7 +396,7 @@ void measurementHumiTemp(void){
         data.light = (float)data.light/1.2;
     }
 
-int measurementADC(void){
+int mADC(void){
   ADRESH=0;//clear the ADC result register
   ADRESL=0;//clear the ADC result register
 
@@ -389,6 +408,7 @@ int measurementADC(void){
 // measurement block
 
 //turn platform
+//return 1 - left, 2 - right, 3 - wait 1 sec after, -1 error, 0 - free
 int isTurn(void){
 	if (!LATBbits.LATB4 && LATBbits.LATB2){
 		return 1;
@@ -396,58 +416,67 @@ int isTurn(void){
 		return 2;
 	} else if(!LATBbits.LATB2 && !LATBbits.LATB4){
 		return -1;
-	} else {
+    } else if (waitTurn == 1){
+        return 3;
+    } else {
 		return 0;
 	}
 }
 
 void interrupt TimerOverflow(void){
 	if (INTCONbits.TMR0IF == 1){
-//		if (timerDeg == 0 && (isTurn() == 1 || isTurn() == 2)){
-//			LATBbits.LATB2 = 1;
-//			LATBbits.LATB4 = 1;
-//		} else
-		if (timerDeg > 0 && isTurn() != 2){
+		if (timerDeg > 0 && isTurn() != 2 && isTurn() != 3){
 			timerDeg--;
 			LATBbits.LATB4 = 0;
 			WriteTimer0(timer1Deg);
-		} else if (timerDeg < 0 && isTurn() != 1) {
+		} else if (timerDeg < 0 && isTurn() != 1 && isTurn() != 3) {
 			timerDeg++;
 			LATBbits.LATB2 = 0;
 			WriteTimer0(timer1Deg);
-		} else {//off
-            LATBbits.LATB4 = 1;
-            LATBbits.LATB2 = 1;
+        } else {//off
+            if (isTurn() != 3){
+                waitTurn = 0;
+            } else {
+				LATBbits.LATB4 = 1;
+				LATBbits.LATB2 = 1;
+				waitTurn = 1;
+            }
             //todo возможно стоит добавить задержку, ибо инерционность)
 		}
 		INTCONbits.TMR0IF = 0;
 	}
 }
 
-void turnPlatform(int deg){
+int turnPlatform(int deg){
 //	int mov;
 //	unsigned int time = 0xE17B;//1 sec
 //	unsigned int time = 0x0BD7;
 //	unsigned int time = 0xA470;//3 sec
 	//(4*256)/8×106 = 128uS
 	//1/128uS = 7813 - 1s
+   //организовать стек?
+    if (!LATBbits.LATB4 || !LATBbits.LATB2){
+        return 0;
+    }
 	timerDeg = deg;
+
 	if (timerDeg > 0){
 		LATBbits.LATB4 = 0;
 	} else if (timerDeg < 0){
 		LATBbits.LATB2 = 0;
 	} 
-	WriteTimer0(0xfffe);
+//	WriteTimer0(0xfffe);
 	INTCONbits.TMR0IF = 0;
+    return 1;
 }
 
-int maxValue(void){
+int calculateDeg(void){
 	int i;
 	int val=0;
 	int result=0;
 	for (i = 0; i < 36; i++){
-		if (data.diod1[i] > val){
-			val = data.diod1[i];
+		if (data.lightPlatform.diod1[i] > val){
+			val = data.lightPlatform.diod1[i];
 			result = i;
 		}
 	}
