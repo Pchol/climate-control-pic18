@@ -44,7 +44,7 @@
     } run;
 
   void measure(char parametr);
-  void measurementHumiTemp();
+  void measurementHumiTemp(void);
   void measurementLight(void);
   int measurementADC(void);
   void measurementLightPlatform(void);
@@ -59,9 +59,9 @@
   void configADC(void);
   void configTimer(void);
 
-  char isLamp(void);
+  int isLamp(void);
   int isTurn(void);
-  char isFan(void);
+  int isFan(void);
 
   void interrupt TimerOverflow(void);
   void turnPlatform(int deg);
@@ -104,15 +104,15 @@ void compare(void){
 
     //сравнение с показаниями и принятие решение какие устройства должны быть включены
     if (data.temp < level.minTemp && !isLamp()){
-            run.lampOn = 0xff;
+            run.lampOn = 1;
     } else if (data.temp > level.maxTemp && isLamp()){
-            run.lampOff = 0xff;
+            run.lampOff = 1;
     }
 
     if (data.humi > level.maxHumi && !isFan()){
-            run.fanOn = 0xff;
+            run.fanOn = 1;
     } else if(data.humi < level.minHumi && isFan()) {
-            run.fanOff = 0xff;
+            run.fanOff = 1;
     }
 }
 
@@ -164,7 +164,6 @@ unsigned int SoRh;
 //sht11 required
 
 // measurement block
-//
 /*void measurementTemp(void){
 
   float t[2];
@@ -387,18 +386,6 @@ int measurementADC(void){
   while(BusyADC()); //wait untill the conversion is completed
   return ReadADC();//read the result of conversion
 }
-
-/*void measurementLightDiods(void){
-	SetChanADC(ADC_CH0);
-    data.diod1 = (float)measurementADC()*3.3/1023;
-	__delay_ms(20);
-
-	SetChanADC(ADC_CH1);
-    data.diod2 = (float)measurementADC()*3.3/1023;
-	__delay_ms(20);
-}
- */
-//
 // measurement block
 
 //turn platform
@@ -469,18 +456,18 @@ int maxValue(void){
 //turn platform
 
 //check lamp is burn
-char isLamp(void){
+int isLamp(void){
 	if (!LATBbits.LATB5){
-		return 0xff;
+		return 1;
 	} else {
 		return 0;
 	}
 }
 
 //fan
-char isFan(void){
+int isFan(void){
 	if (LATCbits.LATC2){
-		return 0xff;
+		return 1;
 	} else {
 		return 0;
 	}
@@ -576,4 +563,3 @@ void configTimer(void){
 
 //	OpenTimer0();
 }
-//config
