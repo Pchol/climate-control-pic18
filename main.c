@@ -337,7 +337,7 @@ void mLightPlatform(void){
 		currentDeg += data.lightPlatform.iterationDeg;
     } else if (!data.lightPlatform.closeMeasurement){ // окончание
         data.lightPlatform.closeMeasurement = 1;
-		data.degMaxLight = (int)calculateDeg()*data.lightPlatform.iterationDeg;
+		data.degMaxLight = calculateDeg();
     }
 }
 
@@ -473,15 +473,15 @@ int turnPlatform(int deg){
 
 int calculateDeg(void){
 	int i;
-	int val=0;
+	float val=0;
 	int result=0;
-	for (i = 0; i < data.lightPlatform.maxDeg/data.lightPlatform.iterationDeg; i++){
+	for (i = 0; i < (int)(data.lightPlatform.maxDeg/data.lightPlatform.iterationDeg); i++){
 		if (data.lightPlatform.diod1[i] > val){
 			val = data.lightPlatform.diod1[i];
 			result = i;
 		}
 	}
-	return result+1;
+	return (int)((result+1)*data.lightPlatform.iterationDeg);
 }
 //turn platform
 
