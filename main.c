@@ -12,9 +12,6 @@
 
   int timer1Deg = 0xF937;
 
-  int  waitTurn = 0;
-  int timerDeg;
-
     struct {
     //    float adc;
     //    float humidutyWather;
@@ -27,6 +24,7 @@
 	    struct {
 			int maxDeg;
 			int iterationDeg;
+			int startMeasurement;
             int closeMeasurement;
 			float diod1[36];
 			float diod2[36];
@@ -69,13 +67,7 @@
 			int complete;
 		} temp;
 		
-		struct {
-			int time;
-			int on;
-			int complete;
-		} lightDiods;
-
-	} event = {};
+	} event;
 
   void measure(char parametr);
   void mHumiTemp(void);
@@ -83,7 +75,7 @@
   int mADC(void);
   void mLightPlatform(void);
   
-  int calculatePower(void);//определяем яркость освещенности
+  int calculatePWM(void);//определяем яркость освещения
   int calculateDeg(void);//определяем угол возврата
 
   void init(void);
@@ -103,43 +95,43 @@
   int isDump(void);
 
   int turnPlatform(int deg);
+  void offPlatform(void);
 
 //main
 void main(void) {
-
 	init();
 
-//	while(!TMR2IF);
-//	TRISBbits.RB3 = 0;
-
-	//выставляем значения по умолчанию для событий
-
 	while(1){//check events
-		if (event.lightDiods.complete){
-			//измеряем текущ показание
-			//если показание последнее смотрим куда нужно сдвинуть, и сдвигаем назад
-			//возвращаемся
-		} 
+		if (event.platform.complete){//запуск вынести отсюда
+			if (!data.lightPlatform.closeMeasurement){
+				mLightPlatform();//старт измерения в случае завершения будет результат и флаг
+
+				event.platform.on = 1;
+			} else {
+				if (!isTurn()){
+					turnPlatform(-(data.lightPlatform.maxDeg - data.degMaxLight));
+
+					event.platform.on = 1;
+				} else {
+					offPlatform();
+					//не поднимаем флаг, data.lighPlatform заканчиваем эти события
+				}
+			}
+			event.platform.complete = 0;
+		}
 
 		if (event.dump.complete){
 			//самое время запустить насос или остановить
 			if (!isDump()){
 				LATBbits.LATB5 = 0;
-                
                 event.dump.time = 15;
-                event.dump.complete = 0;
+
                 event.dump.on = 1;
-			} else if (isDump()){//only one
-				LATBbits.LATB5 = 1;
-                event.dump.complete = 0;
+			} else if (isDump()){
+					LATBbits.LATB5 = 1;
+					//only one
 			}
-		}
-
-		if (event.platform.complete){
-			//1) при первом измерении освещенности
-			//2) при смещении на нужный угол
-			//3) при авторегулировании
-
+			event.dump.complete = 0;
 		}
 
 		if (event.temp.complete){
@@ -155,7 +147,6 @@ void main(void) {
 		//измерение влажности воздуха и температуры датчиком sht1x
 		//измерение освещенности диодами
 		}
-
 	}
 }
 
@@ -166,7 +157,7 @@ void init(void){
 	OSCCONbits.IRCF1 = 1;
 	OSCCONbits.IRCF2 = 1;//freq = 8MGz
 
-//	ei();
+	ei();//включаем прерывания
 	configPorts();
 	configI2C();
 
@@ -175,6 +166,10 @@ void init(void){
 
     configCCP();
 //    configCTMU();
+
+	while(!TMR2IF);
+
+	TRISBbits.RB3 = 0;
 
 }
 
@@ -192,13 +187,6 @@ void measurement(void){
 
 void compare(void){
 	
-/*
-    static int one = 0;
-    if (!isTurn() && data.lightPlatform.closeMeasurement && !one){
-        run.move = 1;
-		one = 1;
-    }
- */
     //сравнение с показаниями и принятие решение какие устройства должны быть включены
     if (data.temp < level.minTemp && !isLamp()){
             run.lampOn = 1;
@@ -215,11 +203,6 @@ void compare(void){
 
 void execution(void){
 
-	/*
-	if (run.move){
-		turnPlatform(-(data.lightPlatform.maxDeg - data.degMaxLight));//
-		run.move = 0;
-	}*/
 	//исполнение
 	if (run.lampOn){
 		LATBbits.LATB5 = 0;
@@ -236,6 +219,8 @@ void execution(void){
 		LATCbits.LATC2 = 0;
 		run.fanOff = 0;
 	}
+
+	SetDCEPWM2(calculatePWM());
 }
 
 //measurement block
@@ -383,14 +368,15 @@ void calculation(void){
 // if(rh_true<0.1)rh_true=0.1;       //the physical possible range
 
 }
+
 //подпрограмма измерения макс угла освещенности
+//значения сохраняются в data.degMaxLight
 void mLightPlatform(void){
    	static int currentDeg = 0;
 
-    if (data.lightPlatform.closeMeasurement == 1){//запуск
-        data.lightPlatform.closeMeasurement = 0;
+    if (data.lightPlatform.startMeasurement){//запуск
+        data.lightPlatform.startMeasurement = 0;
         currentDeg = 0;
-		turnPlatform(data.lightPlatform.maxDeg);
     }
 	if (currentDeg != data.lightPlatform.maxDeg){
 		SetChanADC(ADC_CH0);
@@ -402,8 +388,10 @@ void mLightPlatform(void){
 		__delay_ms(20);
 
 		currentDeg += data.lightPlatform.iterationDeg;
+		turnPlatform(data.lightPlatform.iterationDeg);
     } else if (!data.lightPlatform.closeMeasurement){ // окончание
         data.lightPlatform.closeMeasurement = 1;
+		offPlatform();
 		data.degMaxLight = calculateDeg();
     }
 }
@@ -483,8 +471,6 @@ int isTurn(void){
 		return 2;
 	} else if(!LATBbits.LATB3 && !LATBbits.LATB4){
 		return -1;
-    } else if (waitTurn == 1){
-        return 3;
     } else {
 		return 0;
 	}
@@ -495,6 +481,13 @@ void interrupt oneDegInterupt(void){
 	//таймер на 1 deg
 		if (event.platform.on){//проводятся измерение освещенности (движ двиг)
 			event.platform.time--;
+
+			if (!event.platform.time){
+
+
+				event.platform.complete = 1;
+				event.platform.on = 0;
+			}
 //			if ((event.platform.time - event.lightDiods) == 0){
 //			}
 
@@ -549,16 +542,19 @@ int turnPlatform(int deg){
     if (!LATBbits.LATB4 || !LATBbits.LATB3){
         return 0;
     }
-	timerDeg = deg;
-
-	if (timerDeg > 0){
+	event.platform.time = deg;
+	if (deg > 0){
 		LATBbits.LATB4 = 0;
-	} else if (timerDeg < 0){
+	} else if (deg < 0){
 		LATBbits.LATB3 = 0;
 	} 
-	WriteTimer0(0xfffe);
-	INTCONbits.TMR0IF = 0;
+
     return 1;
+}
+
+void offPlatform(){
+	LATBbits.LATB4 = 1;
+	LATBbits.LATB3 = 1;
 }
 
 int calculateDeg(void){
@@ -576,6 +572,11 @@ int calculateDeg(void){
 	return (int)((result+1)*data.lightPlatform.iterationDeg);
 }
 //turn platform
+
+//выявляем зависимость напряжения подаваемого на шим от освещенности
+int calculatePWM(void){
+	return ~data.light;
+}
 
 //check lamp is burn
 int isLamp(void){
