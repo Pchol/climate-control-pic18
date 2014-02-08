@@ -75,13 +75,16 @@
 			int complete;
 		} lightDiods;
 
-	} event;
+	} event = {};
 
   void measure(char parametr);
   void mHumiTemp(void);
   void mLight(void);
   int mADC(void);
   void mLightPlatform(void);
+  
+  int calculatePower(void);//определяем яркость освещенности
+  int calculateDeg(void);//определяем угол возврата
 
   void init(void);
   void measurement(void);
@@ -99,25 +102,60 @@
   int isFan(void);
   int isDump(void);
 
-//  void interrupt oneSecInterupt(void);
   int turnPlatform(int deg);
 
 //main
 void main(void) {
 
 	init();
-	
+
+//	while(!TMR2IF);
+//	TRISBbits.RB3 = 0;
+
 	//выставляем значения по умолчанию для событий
 
-	while(!TMR2IF);
+	while(1){//check events
+		if (event.lightDiods.complete){
+			//измеряем текущ показание
+			//если показание последнее смотрим куда нужно сдвинуть, и сдвигаем назад
+			//возвращаемся
+		} 
 
-	TRISBbits.RB3 = 1;
+		if (event.dump.complete){
+			//самое время запустить насос или остановить
+			if (!isDump()){
+				LATBbits.LATB5 = 0;
+                
+                event.dump.time = 15;
+                event.dump.complete = 0;
+                event.dump.on = 1;
+			} else if (isDump()){//only one
+				LATBbits.LATB5 = 1;
+                event.dump.complete = 0;
+			}
+		}
 
-	while(1){
-//		measurement();
-//		compare();
-//		execution();
-		__delay_ms(20);
+		if (event.platform.complete){
+			//1) при первом измерении освещенности
+			//2) при смещении на нужный угол
+			//3) при авторегулировании
+
+		}
+
+		if (event.temp.complete){
+			//производим измерения всех датчков
+			//если есть какие-то изменения, то влк/выкл лампу... или вкл/выкл вентилятор и пр...
+			measurement();
+			compare();
+			execution();
+
+            event.temp.time = 1;
+			event.temp.complete = 0;
+			event.temp.on = 1;
+		//измерение влажности воздуха и температуры датчиком sht1x
+		//измерение освещенности диодами
+		}
+
 	}
 }
 
@@ -140,15 +178,14 @@ void init(void){
 
 }
 
-
 void measurement(void){
 	  //измерение освещенности датчиком
 
-//	    measurementLightDiods();
-
-  //измерение температуры
-//      measurementTemp();
-  //измерение влажности почвы
+    mHumiTemp();
+    mLight();
+//измерение температуры
+//  measurementTemp();
+//измерение влажности почвы
 //  measurementC();
 
 }
@@ -162,7 +199,6 @@ void compare(void){
 		one = 1;
     }
  */
-/*
     //сравнение с показаниями и принятие решение какие устройства должны быть включены
     if (data.temp < level.minTemp && !isLamp()){
             run.lampOn = 1;
@@ -175,16 +211,6 @@ void compare(void){
     } else if(data.humi < level.minHumi && isFan()) {
             run.fanOff = 1;
     }
- */
-	if (event.dump.complete == 1){
-		event.dump.time = 16;
-		event.dump.on = 1;
-		if (isDump()){
-			run.dumpOff = 1;
-		} else {
-			run.dumpOn = 1;
-		}
-	}
 }
 
 void execution(void){
@@ -194,8 +220,7 @@ void execution(void){
 		turnPlatform(-(data.lightPlatform.maxDeg - data.degMaxLight));//
 		run.move = 0;
 	}*/
-
-	/*//исполнение
+	//исполнение
 	if (run.lampOn){
 		LATBbits.LATB5 = 0;
 		run.lampOn = 0x0;
@@ -210,14 +235,6 @@ void execution(void){
 	} else if (run.fanOff){
 		LATCbits.LATC2 = 0;
 		run.fanOff = 0;
-	}*/
-
-	if (run.dumpOn && !isDump()){
-		LATBbits.LATB5 = 0;
-		run.dumpOn = 0;
-	} else if (run.dumpOff && isDump()){
-		LATBbits.LATB5 = 1;
-		run.dumpOff = 0;
 	}
 }
 
@@ -473,7 +490,7 @@ int isTurn(void){
 	}
 }
 
-/*void interrupt oneSecInterupt(void){
+void interrupt oneDegInterupt(void){
 	if (INTCONbits.TMR0IF == 1){
 	//таймер на 1 deg
 		if (event.platform.on){//проводятся измерение освещенности (движ двиг)
@@ -498,8 +515,6 @@ int isTurn(void){
 			event.dump.time--;
 			if (!event.dump.time){
 				//делаем включение насоса
-	//			event.dump.time = 0xff;
-
 				event.dump.complete = 1;
 				event.dump.on = 0;
 			}
@@ -508,8 +523,10 @@ int isTurn(void){
 		WriteTimer0(timer1Deg);
 		INTCONbits.TMR0IF = 0;
 	}
+}
+
 ///
-	static int i = 20;
+/*	static int i = 20;
 	if (PIR1bits.TMR1IF){
 		i--;
 		if (!i){
@@ -519,9 +536,7 @@ int isTurn(void){
 		}
 		WriteTimer3(timer05sec);
 		PIR1bits.TMR1IF = 0;
-	}
-/
-}*/
+	}*/
 
 int turnPlatform(int deg){
 //	int mov;
@@ -591,14 +606,20 @@ int isDump(void){
 void configPorts(void){
 	TRISB = 0;//all output
 	TRISC = 0;//all output
-	TRISBbits.RB3 = 0;//for pwm
+	TRISBbits.RB3 = 1;//for pwm (1 if after timer interrupt is set 0) 0 else
 
 //	исоплнительные механизмы
+	
+	//fan
 	LATCbits.LATC2 = 0;//fan default off
 
 	LATBbits.LATB0 = 0;//for ligth sensor h-level address
-	LATBbits.LATB3 = 0;//turn platform default stay
+
+	//platform
+	LATBbits.LATB2 = 1;//turn platform default stay
 	LATBbits.LATB4 = 1;
+
+	//dump
     LATBbits.LATB1 = 1; //pump default off
 }
 
@@ -667,9 +688,11 @@ void configTimers(void){
 	T0CONbits.TMR0ON = 1;//enables timer
 	T0CONbits.T08BIT = 0;//1 - 8bit 0 - 16 bit
 	T0CONbits.PSA = 0;
+	//prescale settings
 	T0CONbits.T0PS0 = 1;//1:256
 	T0CONbits.T0PS1 = 1;
 	T0CONbits.T0PS2 = 1;
+
 	T0CONbits.T0CS = 0;//internal
 
 //	TMR0H = 0;//reset
@@ -720,6 +743,6 @@ void configCCP(void){
 
 //	CCPR2Lbits.CCPR2L = 0x30; //устанавливаем длительность
 //	CCPR2Lbits.CCPR2L = 0x30; //устанавливаем длительность
-	CCPR2L = 0x60;
+	CCPR2L = 0x45;
 	//проверить чтобы порт был как выход rb3
 }
