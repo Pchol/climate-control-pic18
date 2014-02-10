@@ -36,7 +36,7 @@
         char minTemp;
 		char maxHumi;
 		char minHumi;
-    } level = {40, 38, 25, 15};
+    } level = {40, 38, 60, 55};
 
     struct {
         char lampOn;
