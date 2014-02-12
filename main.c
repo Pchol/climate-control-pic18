@@ -1,6 +1,3 @@
-#include <stdio.h>
-#include <stdlib.h>
-
 #include "config.h"
 #include <plib/adc.h>
 //    #include <plib/ctmu.h>
@@ -9,6 +6,10 @@
 #include <plib/pwm.h>
 
 #define USE_OR_MASKS
+
+//for sht11
+#define MEASURE_TEMP 0x03   //000   0001    1
+#define MEASURE_HUMI 0x05  //000   0010    1
 
   int timer1Deg = 0xF937;
 
@@ -19,6 +20,8 @@
  //       float capacitance;
         float temp;
         float humi;
+        float codeHumi;
+        float codeTemp;
         unsigned int light;
         int degMaxLight;
 	    struct {
@@ -29,14 +32,14 @@
 			float diod1[36];
 			float diod2[36];
         } lightPlatform;
-	} data = {0, 0, 0, 0, {360, 10, 1}};
+	} data = {0, 0, 0, 0, 0, 0, {360, 10, 1}};
 
     struct {
         char maxTemp;
         char minTemp;
 		char maxHumi;
 		char minHumi;
-    } level = {40, 38, 60, 55};
+    } level = {40, 38, 25, 30};
 
     struct {
         char lampOn;
@@ -69,7 +72,7 @@
 		
 	} event;
 
-  void measure(char parametr);
+  void mSht1(char parametr);
   void mHumiTemp(void);
   void mLight(void);
   int mADC(void);
@@ -123,12 +126,12 @@ void main(void) {
 		if (event.dump.complete){
 			//самое время запустить насос или остановить
 			if (!isDump()){
-				LATBbits.LATB5 = 0;
+				LATBbits.LATB1 = 0;
                 event.dump.time = 15;
 
                 event.dump.on = 1;
 			} else if (isDump()){
-					LATBbits.LATB5 = 1;
+					LATBbits.LATB1 = 1;
 					//only one
 			}
 			event.dump.complete = 0;
@@ -170,6 +173,15 @@ void init(void){
 	while(!TMR2IF);
 
 	TRISBbits.RB3 = 0;
+	
+	event.dump.time = 20;
+	event.dump.on = 1;
+
+	event.temp.time = 1;
+	event.temp.on = 1;
+
+	event.platform.time = 1;
+	event.platform.on = 1;
 
 }
 
@@ -181,7 +193,7 @@ void measurement(void){
 //измерение температуры
 //  measurementTemp();
 //измерение влажности почвы
-//  measurementC();
+//  mC();
 
 }
 
@@ -206,10 +218,10 @@ void execution(void){
 	//исполнение
 	if (run.lampOn){
 		LATBbits.LATB5 = 0;
-		run.lampOn = 0x0;
+		run.lampOn = 0;
 	} else if (run.lampOff){
 		LATBbits.LATB5 = 1;
-		run.lampOff = 0x0;
+		run.lampOff = 0;
 	}
 
 	if (run.fanOn){
@@ -227,24 +239,7 @@ void execution(void){
 
 //sht11 required
 //
-#define STATUS_REG_W 0x06   //000   0011    0
-#define STATUS_REG_R 0x07   //000   0011    1
-#define MEASURE_TEMP 0x03   //000   0001    1
-#define MEASURE_HUMI 0x05   //000   0010    1
-#define RESET_SENSOR 0x1e   //000   1111    0
 
-const float C1=-4.0;              // for 12 Bit
-const float C2=+0.0405;           // for 12 Bit
-const float C3=-0.0000028;        // for 12 Bit
-const float T1=+0.01;             // for 14 Bit @ 5V
-const float T2=+0.00008;           // for 14 Bit @ 5V
-
-const float d1=-39.66;
-const float d2=0.01;
-
-unsigned int SoT;
-unsigned int SoRh;
-//sht11 required
 
 // measurement block
 /*void measurementTemp(void){
@@ -286,7 +281,7 @@ unsigned int SoRh;
   data.temp = t[0]+(float)0xff/t[1];
 }*/
 
-/*    void measurementC(void){
+/*    void mC(void){
 
       unsigned int Vread=0;
       float voltage;// Vcal=0, CTMUISrc = 0;
@@ -317,9 +312,9 @@ unsigned int SoRh;
       data.capacitance = (float)(time*current/voltage - ownCap);//result in pf
     }*/
 
-void measure(char parametr){ 
+void mSht1(char parametr){
 	char checksum;
-	char *uk;
+	int result;
 
 	//	select temp register
 	IdleI2C1();
@@ -337,22 +332,28 @@ void measure(char parametr){
 
 	if (parametr == MEASURE_HUMI){
 		__delay_ms(80);
-		uk=(unsigned char)&SoRh;
+//		uk=(unsigned char)&SoRh;
 	} else if (parametr == MEASURE_TEMP){
 		__delay_ms(80);
 		__delay_ms(80);
 		__delay_ms(80);
 		__delay_ms(80);
-		uk=(unsigned char)&SoT;
+//		uk=(unsigned char)&SoT;
 	}
 
 	IdleI2C1();
-	*(uk+1)=ReadI2C1();
+	result=ReadI2C1()<<8;
 	AckI2C1();
 
 	IdleI2C1();
-	*(uk)=ReadI2C1();
+	result|=ReadI2C1();
 	AckI2C1();
+
+    if (parametr == MEASURE_HUMI){
+        data.codeHumi = result;
+    } else if (parametr == MEASURE_TEMP){
+        data.codeTemp = result;
+    }
 
 	IdleI2C1();
 	checksum = ReadI2C1();
@@ -361,8 +362,17 @@ void measure(char parametr){
 }
 
 void calculation(void){
-	data.temp=d2*SoT+d1;
-	data.humi=(data.temp-25)*(T1+T2*SoRh)+C1+C2*SoRh+C3*SoRh*SoRh;
+	float C1=-4.0;              // for 12 Bit
+	float C2=+0.0405;           // for 12 Bit
+	float C3=-0.0000028;        // for 12 Bit
+	float T1=+0.01;             // for 14 Bit @ 5V
+	float T2=+0.00008;           // for 14 Bit @ 5V
+
+	float d1=-39.66;
+	float d2=0.01;
+
+	data.temp=d2*data.codeTemp+d1;
+	data.humi=(data.temp-25)*(T1+T2*data.codeHumi)+C1+C2*data.codeHumi+C3*data.codeHumi*data.codeHumi;
 
 //if(rh_true>100)rh_true=100;       //cut if the value is outside of
 // if(rh_true<0.1)rh_true=0.1;       //the physical possible range
@@ -398,8 +408,12 @@ void mLightPlatform(void){
 
 // измерение влажности воздуха и температуры
 void mHumiTemp(void){
-  measure(MEASURE_TEMP);
-  measure(MEASURE_HUMI);
+//char STATUS_REG_W 0x06   //000   0011    0
+//char STATUS_REG_R 0x07   //000   0011    1
+//char RESET_SENSOR 0x1e   //000   1111    0
+
+  mSht1(MEASURE_TEMP);
+  mSht1(MEASURE_HUMI);
   calculation();
 }
 
@@ -465,11 +479,11 @@ int mADC(void){
 //turn platform
 //return 1 - left, 2 - right, 3 - wait 1 sec after, -1 error, 0 - free
 int isTurn(void){
-	if (!LATBbits.LATB4 && LATBbits.LATB3){
+	if (!LATBbits.LATB4 && LATBbits.LATB2){
 		return 1;
-	} else if (!LATBbits.LATB3 && LATBbits.LATB4){
+	} else if (!LATBbits.LATB2 && LATBbits.LATB4){
 		return 2;
-	} else if(!LATBbits.LATB3 && !LATBbits.LATB4){
+	} else if(!LATBbits.LATB2 && !LATBbits.LATB4){
 		return -1;
     } else {
 		return 0;
@@ -480,14 +494,16 @@ void interrupt oneDegInterupt(void){
 	if (INTCONbits.TMR0IF == 1){
 	//таймер на 1 deg
 		if (event.platform.on){//проводятся измерение освещенности (движ двиг)
-			event.platform.time--;
-
-			if (!event.platform.time){
-
+			if (event.platform.time > 0){
+				event.platform.time --;
+			} else if (event.platform.time <0){
+				event.platform.time ++;
+			} else {
 
 				event.platform.complete = 1;
 				event.platform.on = 0;
 			}
+
 //			if ((event.platform.time - event.lightDiods) == 0){
 //			}
 
@@ -502,6 +518,14 @@ void interrupt oneDegInterupt(void){
 	//				LATBbits.LATB4 = 1;
 	//				LATBbits.LATB3 = 1;
 	//				waitTurn = 1;
+		}
+		
+		if (event.temp.on){
+			event.temp.time--;
+			if (!event.temp.time){
+				event.temp.complete = 1;
+				event.temp.on = 0;
+			}
 		}
 
 		if (event.dump.on){
@@ -518,18 +542,6 @@ void interrupt oneDegInterupt(void){
 	}
 }
 
-///
-/*	static int i = 20;
-	if (PIR1bits.TMR1IF){
-		i--;
-		if (!i){
-
-			LATBbits.LATB5 = ~LATBbits.LATB5;
-			i = 20;
-		}
-		WriteTimer3(timer05sec);
-		PIR1bits.TMR1IF = 0;
-	}*/
 
 int turnPlatform(int deg){
 //	int mov;
@@ -539,14 +551,14 @@ int turnPlatform(int deg){
 	//(4*256)/8×106 = 128uS
 	//1/128uS = 7813 - 1s
    //организовать стек?
-    if (!LATBbits.LATB4 || !LATBbits.LATB3){
-        return 0;
-    }
 	event.platform.time = deg;
+    if (!LATBbits.LATB4 || !LATBbits.LATB2){
+        return;
+    }
 	if (deg > 0){
 		LATBbits.LATB4 = 0;
 	} else if (deg < 0){
-		LATBbits.LATB3 = 0;
+		LATBbits.LATB2 = 0;
 	} 
 
     return 1;
@@ -554,7 +566,7 @@ int turnPlatform(int deg){
 
 void offPlatform(){
 	LATBbits.LATB4 = 1;
-	LATBbits.LATB3 = 1;
+	LATBbits.LATB2 = 1;
 }
 
 int calculateDeg(void){
@@ -597,7 +609,7 @@ int isFan(void){
 }
 
 int isDump(void){
-	if (!LATBbits.LATB5){
+	if (!LATBbits.LATB1){
 		return 1;
 	} else {
 		return 0;
@@ -613,14 +625,12 @@ void configPorts(void){
 	
 	//fan
 	LATCbits.LATC2 = 0;//fan default off
-
 	LATBbits.LATB0 = 0;//for ligth sensor h-level address
-
 	//platform
 	LATBbits.LATB2 = 1;//turn platform default stay
 	LATBbits.LATB4 = 1;
 
-	//dump
+	LATBbits.LATB5 = 1;//lamp
     LATBbits.LATB1 = 1; //pump default off
 }
 
