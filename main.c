@@ -7,7 +7,6 @@
 
 #define USE_OR_MASKS
 
-
     struct {
         float temp;
         float humi;
@@ -65,8 +64,8 @@
   int mADC(void);
   void mLightPlatform(void);
   
-  int calcPWM(void);//определяем яркость освещения
-  int calcMaxDeg(void);//определяем угол максимальной освещенности
+  int calcPWM(void);
+  int calcMaxDeg(void);
   void calcSht1(float *humi, float *temp);
 
   void init(void);
@@ -85,14 +84,13 @@
   int isFan(void);
   int isDump(void);
 
-  int turnPlatform(int deg);
+  int turnPlatform(int move);
   void offPlatform(void);
 
-//main
 void main(void) {
 	init();
 
-	while(1){//check events
+	while(1){
 		if (event.platform.complete){
 			if (!data.lightPlatform.closeMeasurement){
 				mLightPlatform();
@@ -112,14 +110,13 @@ void main(void) {
                     }
 				} else {
 					offPlatform();
-					//не устанавливаем event.platform.on, на этом заканчиваем работу с платформой
+					//не устанавливаем event.platform.on, на этом этапе заканчивается работа с платформой
 				}
 			}
 			event.platform.complete = 0;
 		}
 
 		if (event.dump.complete){
-			//самое время запустить насос или остановить
 			if (!isDump()){
 				LATBbits.LATB1 = 0;
                 event.dump.time = 15;
@@ -178,6 +175,9 @@ void init(void){
 
 }
 
+/**
+ * измерения
+ */
 void measurement(void){
 	  //измерение освещенности датчиком
 	data.temp = mSht1(0);//изм. темпр.
@@ -192,6 +192,9 @@ void measurement(void){
 
 }
 
+/**
+ * сравнение значений с уровнями
+ */
 void compare(void){
 	
     //сравнение с показаниями и принятие решение какие устройства должны быть включены
@@ -208,9 +211,11 @@ void compare(void){
     }
 }
 
+/**
+ * запуск устройства
+ */
 void execution(void){
 
-	//исполнение
 	if (run.lampOn){
 		LATBbits.LATB5 = 0;
 		run.lampOn = 0;
@@ -300,7 +305,8 @@ void execution(void){
       data.capacitance = (float)(time*current/voltage - ownCap);//result in pf
     }*/
 
-/* функция проводящая измерения влажности/температуры воздуха
+/**
+ * измерение влажности или температуры воздуха
  * char param - параметр, определяющий что будем измерять (0 - влажность, 1 - температура)
  * измеренные значения сохраняются в data.codeTemp или data.codeHumi
  * return возвращает измеренные значения
@@ -358,7 +364,7 @@ int mSht1(char param){
 }
 
 /**
- * функция перерасчета параметров из цифрового кода в % влажности/градусы
+ * перерасчет параметров из цифрового кода в % влажности/градусы
  * @param codeHumi значение влажности в цифровом коде
  * @param codeTemp значение температуры в цифровом коде
  * функция записывает значения в указатели codeHumi, codeTemp
@@ -381,7 +387,11 @@ void calcSht1(float *codeHumi, float *codeTemp){
 // if(rh_true<0.1)rh_true=0.1;       //the physical possible range
 }
 
-//значения сохраняются в data.degMaxLight, при последней итерации устанавливается data.lightPlatform.closeMeasurement. Первая итерация вкл. поворотную платформу, последняя - выключает
+/**
+ * значения измерений сохраняются в data.degMaxLight, при последней итерации
+ * устанавливается data.lightPlatform.closeMeasurement.
+ * Первая итерация вкл. поворотную платформу, последняя - выключает
+ */
 void mLightPlatform(void){
    	static int currentDeg = 0;
 
@@ -408,8 +418,8 @@ void mLightPlatform(void){
 }
 
 /**
- * функция измерения освещенности
- * return возвращает измеренные значения освещенности
+ * измерение освещенности
+ * @return измеренные значения освещенности
  */
 unsigned int mLight(void){
 		int result;
@@ -457,7 +467,7 @@ unsigned int mLight(void){
         return (int)(result/1.2);
     }
 
-/*
+/**
  * измерение напряжения на АЦП
  */
 int mADC(void){
@@ -470,21 +480,6 @@ int mADC(void){
   return ReadADC();//read the result of conversion
 }
 // measurement block
-
-//turn platform
-//return 1 - left, 2 - right, -1 error, 0 - free
-int isTurn(void){
-	if (!LATBbits.LATB4 && LATBbits.LATB2){
-		return 1;
-	} else if (!LATBbits.LATB2 && LATBbits.LATB4){
-		return 2;
-	} else if(!LATBbits.LATB2 && !LATBbits.LATB4){
-		return -1;
-    } else {
-		return 0;
-	}
-}
-
 void interrupt oneDegInterupt(void){
     int timer1Deg = 0xF937;
 
@@ -525,14 +520,14 @@ void interrupt oneDegInterupt(void){
 }
 
 /**
- * @param параметр, определяющий в какую сторону поворачивать платформу, если больше нуля в одну сторону, меньше - в другую
+ * @param move параметр, определяющий в какую сторону поворачивать платформу, если больше нуля вправo, меньше - влево
  * @return -1 - ошибка, 0 - продолжаем вращение в том-же направлелнии, 1 - влкючили поворот
  */
-int turnPlatform(int direction){
+int turnPlatform(int move){
 //	unsigned int time = 0xA470;//3 sec
 	//(4*256)/8×106 = 128uS
 	//1/128uS = 7813 - 1s
-    if ((!LATBbits.LATB4 && direction < 0) || (!LATBbits.LATB2 && direction > 0)){
+    if ((!LATBbits.LATB4 && move < 0) || (!LATBbits.LATB2 && move > 0)){
 		return -1;
     }
 
@@ -540,20 +535,26 @@ int turnPlatform(int direction){
         return 0;
     }
 
-	if (direction > 0){
+	if (move > 0){
 		LATBbits.LATB4 = 0;
-	} else if (direction < 0){
+	} else if (move < 0){
 		LATBbits.LATB2 = 0;
 	} 
 
     return 1;
 }
 
+/**
+ * выключаем платформу
+ */
 void offPlatform(){
 	LATBbits.LATB4 = 1;
 	LATBbits.LATB2 = 1;
 }
 
+/**
+ * расчет максимального угла освещенности
+ */
 int calcMaxDeg(void){
 	int i;
 	float val=0;
@@ -568,14 +569,32 @@ int calcMaxDeg(void){
 	}
 	return (int)((result+1)*data.lightPlatform.iterationDeg);
 }
-//turn platform
 
 //выявляем зависимость напряжения подаваемого на шим от освещенности
 int calcPWM(void){
 	return ~data.light;
 }
 
-//check lamp is burn
+/**
+ * проверяем состояни поворотной платформы
+ * return 1 - вращается вправо, 2 - влево, - 1 ошибка, 0 - платформа выключена
+ */
+int isTurn(void){
+	if (!LATBbits.LATB4 && LATBbits.LATB2){
+		return 1;
+	} else if (!LATBbits.LATB2 && LATBbits.LATB4){
+		return 2;
+	} else if(!LATBbits.LATB2 && !LATBbits.LATB4){
+		return -1;
+    } else {
+		return 0;
+	}
+}
+
+/**
+ * проверка состояния лампы
+ * @return 1 - лампа включена, 0 - лампа выключена
+ */
 int isLamp(void){
 	if (!LATBbits.LATB5){
 		return 1;
@@ -584,7 +603,10 @@ int isLamp(void){
 	}
 }
 
-//fan
+/**
+ * проверка состояния вентилятора
+ * @return 1 - вентилятора включен, 0 - вентилятор выключен
+ */
 int isFan(void){
 	if (LATCbits.LATC2){
 		return 1;
@@ -593,6 +615,10 @@ int isFan(void){
 	}
 }
 
+/**
+ * проверка состояния насоса 
+ * @return 1 - насос включен, 0 - насос выключен 
+ */
 int isDump(void){
 	if (!LATBbits.LATB1){
 		return 1;
@@ -600,7 +626,10 @@ int isDump(void){
 		return 0;
 	}
 }
-//config
+
+/**
+ * конфигурирование портов
+ */
 void configPorts(void){
 	TRISB = 0;//all output
 	TRISC = 0;//all output
@@ -619,6 +648,9 @@ void configPorts(void){
     LATBbits.LATB1 = 1; //pump default off
 }
 
+/**
+ * конфигурирования I2C
+ */
 void configI2C(void){
 	TRISC = 0x18;//input rc3 and rc4
 	SSP1ADD = 0xf9;					// 100KHz (Fosc = 4MHz)
@@ -662,6 +694,9 @@ void configI2C(void){
   ADCON0bits.ADON=1;
 }*/
 
+/**
+ * конфигурирование модуля АЦП
+ */
 void configADC(void){
 
     TRISA = 0x03;
@@ -679,6 +714,9 @@ void configADC(void){
 //	OpenADC(config1, config2, config3);
 }
 
+/**
+ * конфигурирование таймеров
+ */
 void configTimers(void){
 
 	T0CONbits.TMR0ON = 1;//enables timer
@@ -722,6 +760,9 @@ void configTimers(void){
 
 }
 
+/**
+ * конфигурирование модуля ccp
+ */
 void configCCP(void){
 
     CCP2CONbits.CCP2M0 = 0;//mode pwm
