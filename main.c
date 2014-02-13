@@ -7,21 +7,10 @@
 
 #define USE_OR_MASKS
 
-//for sht11
-#define MEASURE_TEMP 0x03   //000   0001    1
-#define MEASURE_HUMI 0x05  //000   0010    1
-
-  int timer1Deg = 0xF937;
 
     struct {
-    //    float adc;
-    //    float humidutyWather;
-    //    float humidutySoil;
- //       float capacitance;
         float temp;
         float humi;
-        float codeHumi;
-        float codeTemp;
         unsigned int light;
         int degMaxLight;
 	    struct {
@@ -32,7 +21,7 @@
 			float diod1[36];
 			float diod2[36];
         } lightPlatform;
-	} data = {0, 0, 0, 0, 0, 0, {360, 10, 1}};
+	} data = {0, 0, 0, 0, {360, 10, 1}};
 
     struct {
         char maxTemp;
@@ -48,7 +37,6 @@
 		char fanOff;
 		int dumpOn;
 		int dumpOff;
-        signed int move;
     } run;
 	
 	struct {
@@ -72,14 +60,14 @@
 		
 	} event;
 
-  void mSht1(char parametr);
-  void mHumiTemp(void);
-  void mLight(void);
+  int mSht1(char parametr);
+  unsigned int mLight(void);
   int mADC(void);
   void mLightPlatform(void);
   
-  int calculatePWM(void);//определяем яркость освещения
-  int calculateDeg(void);//определяем угол возврата
+  int calcPWM(void);//определяем яркость освещения
+  int calcMaxDeg(void);//определяем угол максимальной освещенности
+  void calcSht1(float *humi, float *temp);
 
   void init(void);
   void measurement(void);
@@ -105,19 +93,26 @@ void main(void) {
 	init();
 
 	while(1){//check events
-		if (event.platform.complete){//запуск вынести отсюда
+		if (event.platform.complete){
 			if (!data.lightPlatform.closeMeasurement){
-				mLightPlatform();//старт измерения в случае завершения будет результат и флаг
+				mLightPlatform();
+				event.platform.time = data.lightPlatform.iterationDeg;
 
+                if (data.lightPlatform.closeMeasurement){//измерение закончено, ждем 1 секунду
+                    event.platform.time = 5;//one sec wait
+                }
 				event.platform.on = 1;
 			} else {
 				if (!isTurn()){
-					turnPlatform(-(data.lightPlatform.maxDeg - data.degMaxLight));
-
-					event.platform.on = 1;
+                    int returnDeg = -(data.lightPlatform.maxDeg - data.degMaxLight);
+                    if (returnDeg < 0){
+						turnPlatform(-1);
+                        event.platform.time = returnDeg;
+						event.platform.on = 1;
+                    }
 				} else {
 					offPlatform();
-					//не поднимаем флаг, data.lighPlatform заканчиваем эти события
+					//не устанавливаем event.platform.on, на этом заканчиваем работу с платформой
 				}
 			}
 			event.platform.complete = 0;
@@ -138,11 +133,10 @@ void main(void) {
 		}
 
 		if (event.temp.complete){
-			//производим измерения всех датчков
-			//если есть какие-то изменения, то влк/выкл лампу... или вкл/выкл вентилятор и пр...
-			measurement();
-			compare();
-			execution();
+			
+			measurement();//производим измерения всех датчков
+			compare();//сравниваем значения с уровнями
+			execution();//запускаем устройства
 
             event.temp.time = 1;
 			event.temp.complete = 0;
@@ -152,7 +146,6 @@ void main(void) {
 		}
 	}
 }
-
 //function initializiation all components
 void init(void){
 
@@ -187,9 +180,11 @@ void init(void){
 
 void measurement(void){
 	  //измерение освещенности датчиком
+	data.temp = mSht1(0);//изм. темпр.
+	data.humi = mSht1(1);//из. влажность
+	calcSht1(&data.temp, &data.humi);//делаем перерасчет
 
-    mHumiTemp();
-    mLight();
+    data.light = mLight();
 //измерение температуры
 //  measurementTemp();
 //измерение влажности почвы
@@ -232,16 +227,9 @@ void execution(void){
 		run.fanOff = 0;
 	}
 
-	SetDCEPWM2(calculatePWM());
+	SetDCEPWM2(calcPWM());
 }
 
-//measurement block
-
-//sht11 required
-//
-
-
-// measurement block
 /*void measurementTemp(void){
 
   float t[2];
@@ -312,7 +300,22 @@ void execution(void){
       data.capacitance = (float)(time*current/voltage - ownCap);//result in pf
     }*/
 
-void mSht1(char parametr){
+/* функция проводящая измерения влажности/температуры воздуха
+ * char param - параметр, определяющий что будем измерять (0 - влажность, 1 - температура)
+ * измеренные значения сохраняются в data.codeTemp или data.codeHumi
+ * return возвращает измеренные значения
+ */
+int mSht1(char param){
+
+//char STATUS_REG_W 0x06   //000   0011    0
+//char STATUS_REG_R 0x07   //000   0011    1
+//char RESET_SENSOR 0x1e   //000   1111    0
+
+    char humi = 0;
+    char temp = 1;
+
+    char address = (param == temp)?0x03:0x05;
+
 	char checksum;
 	int result;
 
@@ -326,19 +329,17 @@ void mSht1(char parametr){
 	RestartI2C1();
 	IdleI2C1();
 
-	if (WriteI2C1(parametr) == -2){
+	if (WriteI2C1(address) == -2){
 		while(1);
 	}
 
-	if (parametr == MEASURE_HUMI){
+	if (param == humi){
 		__delay_ms(80);
-//		uk=(unsigned char)&SoRh;
-	} else if (parametr == MEASURE_TEMP){
-		__delay_ms(80);
+	} else if (param == temp){
 		__delay_ms(80);
 		__delay_ms(80);
 		__delay_ms(80);
-//		uk=(unsigned char)&SoT;
+		__delay_ms(80);
 	}
 
 	IdleI2C1();
@@ -349,19 +350,21 @@ void mSht1(char parametr){
 	result|=ReadI2C1();
 	AckI2C1();
 
-    if (parametr == MEASURE_HUMI){
-        data.codeHumi = result;
-    } else if (parametr == MEASURE_TEMP){
-        data.codeTemp = result;
-    }
-
 	IdleI2C1();
 	checksum = ReadI2C1();
 	NotAckI2C1();
     StopI2C();
+    return result;
 }
 
-void calculation(void){
+/**
+ * функция перерасчета параметров из цифрового кода в % влажности/градусы
+ * @param codeHumi значение влажности в цифровом коде
+ * @param codeTemp значение температуры в цифровом коде
+ * функция записывает значения в указатели codeHumi, codeTemp
+ */
+void calcSht1(float *codeHumi, float *codeTemp){
+
 	float C1=-4.0;              // for 12 Bit
 	float C2=+0.0405;           // for 12 Bit
 	float C3=-0.0000028;        // for 12 Bit
@@ -371,22 +374,21 @@ void calculation(void){
 	float d1=-39.66;
 	float d2=0.01;
 
-	data.temp=d2*data.codeTemp+d1;
-	data.humi=(data.temp-25)*(T1+T2*data.codeHumi)+C1+C2*data.codeHumi+C3*data.codeHumi*data.codeHumi;
+    *codeTemp = d2**codeTemp+d1;
+    *codeHumi = (*codeTemp-25)*(T1+T2**codeHumi)+C1+C2**codeHumi+C3**codeHumi**codeHumi;
 
 //if(rh_true>100)rh_true=100;       //cut if the value is outside of
 // if(rh_true<0.1)rh_true=0.1;       //the physical possible range
-
 }
 
-//подпрограмма измерения макс угла освещенности
-//значения сохраняются в data.degMaxLight
+//значения сохраняются в data.degMaxLight, при последней итерации устанавливается data.lightPlatform.closeMeasurement. Первая итерация вкл. поворотную платформу, последняя - выключает
 void mLightPlatform(void){
    	static int currentDeg = 0;
 
     if (data.lightPlatform.startMeasurement){//запуск
         data.lightPlatform.startMeasurement = 0;
         currentDeg = 0;
+		turnPlatform(1);
     }
 	if (currentDeg != data.lightPlatform.maxDeg){
 		SetChanADC(ADC_CH0);
@@ -398,32 +400,25 @@ void mLightPlatform(void){
 		__delay_ms(20);
 
 		currentDeg += data.lightPlatform.iterationDeg;
-		turnPlatform(data.lightPlatform.iterationDeg);
     } else if (!data.lightPlatform.closeMeasurement){ // окончание
         data.lightPlatform.closeMeasurement = 1;
 		offPlatform();
-		data.degMaxLight = calculateDeg();
+		data.degMaxLight = calcMaxDeg();
     }
 }
 
-// измерение влажности воздуха и температуры
-void mHumiTemp(void){
-//char STATUS_REG_W 0x06   //000   0011    0
-//char STATUS_REG_R 0x07   //000   0011    1
-//char RESET_SENSOR 0x1e   //000   1111    0
+/**
+ * функция измерения освещенности
+ * return возвращает измеренные значения освещенности
+ */
+unsigned int mLight(void){
+		int result;
 
-  mSht1(MEASURE_TEMP);
-  mSht1(MEASURE_HUMI);
-  calculation();
-}
-
-void mLight(void){
         IdleI2C();
         StartI2C();
 
         IdleI2C();
         if (WriteI2C(0x46) == -2){
-//        if (WriteI2C(0xB8) == -2){
 			//l-level 0xB8
 			//h-level 0x46
           while(1);
@@ -433,14 +428,12 @@ void mLight(void){
         if (WriteI2C(0x13) == -2){
                 //0x10 h-res
                 //0x13 l-res
-        while(1);
+			while(1);
         }
 
         IdleI2C();
         StopI2C();
 
-//		__delay_ms(80);
-//		__delay_ms(80);
         __delay_ms(16);//for l-resolution
 
         IdleI2C();
@@ -448,23 +441,25 @@ void mLight(void){
 
         IdleI2C();
         if (WriteI2C(0x47) == -2){
-//		if (WriteI2C(0xB9) == -2){
                 //l-level 0x47
                 //h-level 0xB9
                 while(1);
         }
 
         IdleI2C();
-        data.light = ReadI2C()<<8;
+        result = ReadI2C()<<8;
         AckI2C();
 
         IdleI2C();
-        data.light |= ReadI2C();
+        result |= ReadI2C();
         NotAckI2C();
         StopI2C();
-        data.light = (float)data.light/1.2;
+        return (int)(result/1.2);
     }
 
+/*
+ * измерение напряжения на АЦП
+ */
 int mADC(void){
   ADRESH=0;//clear the ADC result register
   ADRESL=0;//clear the ADC result register
@@ -477,7 +472,7 @@ int mADC(void){
 // measurement block
 
 //turn platform
-//return 1 - left, 2 - right, 3 - wait 1 sec after, -1 error, 0 - free
+//return 1 - left, 2 - right, -1 error, 0 - free
 int isTurn(void){
 	if (!LATBbits.LATB4 && LATBbits.LATB2){
 		return 1;
@@ -491,6 +486,8 @@ int isTurn(void){
 }
 
 void interrupt oneDegInterupt(void){
+    int timer1Deg = 0xF937;
+
 	if (INTCONbits.TMR0IF == 1){
 	//таймер на 1 deg
 		if (event.platform.on){//проводятся измерение освещенности (движ двиг)
@@ -503,21 +500,6 @@ void interrupt oneDegInterupt(void){
 				event.platform.complete = 1;
 				event.platform.on = 0;
 			}
-
-//			if ((event.platform.time - event.lightDiods) == 0){
-//			}
-
-//			if (!event.platform.time){
-//				event.platform.complete = 1;
-//				event.platform.on = 0;
-//			}
-	//			LATBbits.LATB4 = 0;
-	//			if (isTurn() == 3){//заканчиваем вращение
-	//				waitTurn = 0;
-	//			} else {//выключаем и ждем 1 сек
-	//				LATBbits.LATB4 = 1;
-	//				LATBbits.LATB3 = 1;
-	//				waitTurn = 1;
 		}
 		
 		if (event.temp.on){
@@ -542,22 +524,25 @@ void interrupt oneDegInterupt(void){
 	}
 }
 
-
-int turnPlatform(int deg){
-//	int mov;
-//	unsigned int time = 0xE17B;//1 sec
-//	unsigned int time = 0x0BD7;
+/**
+ * @param параметр, определяющий в какую сторону поворачивать платформу, если больше нуля в одну сторону, меньше - в другую
+ * @return -1 - ошибка, 0 - продолжаем вращение в том-же направлелнии, 1 - влкючили поворот
+ */
+int turnPlatform(int direction){
 //	unsigned int time = 0xA470;//3 sec
 	//(4*256)/8×106 = 128uS
 	//1/128uS = 7813 - 1s
-   //организовать стек?
-	event.platform.time = deg;
-    if (!LATBbits.LATB4 || !LATBbits.LATB2){
-        return;
+    if ((!LATBbits.LATB4 && direction < 0) || (!LATBbits.LATB2 && direction > 0)){
+		return -1;
     }
-	if (deg > 0){
+
+    if(!LATBbits.LATB2 || !LATBbits.LATB4){
+        return 0;
+    }
+
+	if (direction > 0){
 		LATBbits.LATB4 = 0;
-	} else if (deg < 0){
+	} else if (direction < 0){
 		LATBbits.LATB2 = 0;
 	} 
 
@@ -569,7 +554,7 @@ void offPlatform(){
 	LATBbits.LATB2 = 1;
 }
 
-int calculateDeg(void){
+int calcMaxDeg(void){
 	int i;
 	float val=0;
 	int result=0;
@@ -586,7 +571,7 @@ int calculateDeg(void){
 //turn platform
 
 //выявляем зависимость напряжения подаваемого на шим от освещенности
-int calculatePWM(void){
+int calcPWM(void){
 	return ~data.light;
 }
 
@@ -709,7 +694,7 @@ void configTimers(void){
 //	TMR0H = 0;//reset
 //	TMR0L = 0;
 	INTCONbits.TMR0IE = 1;//ienable timer0 overflow interrupt
-	WriteTimer0(timer1Deg);
+//	WriteTimer0(timer1Deg);
 //	OpenTimer0();
 
 	/*
