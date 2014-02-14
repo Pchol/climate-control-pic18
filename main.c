@@ -1,6 +1,6 @@
 #include "config.h"
 #include <plib/adc.h>
-//    #include <plib/ctmu.h>
+#include <plib/ctmu.h>
 #include <plib/i2c.h>
 #include <plib/timers.h>
 #include <plib/pwm.h>
@@ -10,6 +10,7 @@
     struct {
         float temp;
         float humi;
+        float capacitance;
         unsigned int light;
         int degMaxLight;
 	    struct {
@@ -20,14 +21,15 @@
 			float diod1[36];
 			float diod2[36];
         } lightPlatform;
-	} data = {0, 0, 0, 0, {360, 10, 1}};
+	} data = {0, 0, 0, 0, 0, {360, 10, 1}};
 
     struct {
         char maxTemp;
         char minTemp;
 		char maxHumi;
 		char minHumi;
-    } level = {40, 38, 25, 30};
+        char minCapacitance;
+    } level = {40, 38, 25, 30, 30};
 
     struct {
         char lampOn;
@@ -44,13 +46,11 @@
 			int on;
 			int complete;
 		} platform;
-		
 		struct {
 			int time;
 			int on;
 			int complete;
 		} dump;
-		
 		struct {
 			int time;
 			int on;
@@ -62,6 +62,7 @@
   int mSht1(char parametr);
   unsigned int mLight(void);
   int mADC(void);
+  float mC(void);
   void mLightPlatform(void);
   
   int calcPWM(void);
@@ -78,6 +79,7 @@
   void configADC(void);
   void configTimers(void);
   void configCCP(void);
+  void configCTMU(void);
 
   int isLamp(void);
   int isTurn(void);
@@ -91,11 +93,11 @@ void main(void) {
 	init();
 
 	while(1){
+
 		if (event.platform.complete){
 			if (!data.lightPlatform.closeMeasurement){
 				mLightPlatform();
 				event.platform.time = data.lightPlatform.iterationDeg;
-
                 if (data.lightPlatform.closeMeasurement){//измерение закончено, ждем 1 секунду
                     event.platform.time = 5;//one sec wait
                 }
@@ -109,8 +111,7 @@ void main(void) {
 						event.platform.on = 1;
                     }
 				} else {
-					offPlatform();
-					//не устанавливаем event.platform.on, на этом этапе заканчивается работа с платформой
+					offPlatform();//не устанавливаем event.platform.on, на этом этапе заканчивается работа с платформой
 				}
 			}
 			event.platform.complete = 0;
@@ -118,28 +119,33 @@ void main(void) {
 
 		if (event.dump.complete){
 			if (!isDump()){
-				LATBbits.LATB1 = 0;
-                event.dump.time = 15;
+				data.capacitance = mC();//емкость
+                if (data.capacitance < level.minCapacitance){
+					LATBbits.LATB1 = 0;
+                    event.dump.time = 15;//длительность работы насоса
+                } else {
+                    event.dump.time = 100;//время между измерениями
+                }
 
                 event.dump.on = 1;
 			} else if (isDump()){
 					LATBbits.LATB1 = 1;
-					//only one
+
+                    event.dump.time = 300;//1min ждем, пока вода опустится до дна
+                    event.dump.on = 1;
 			}
 			event.dump.complete = 0;
 		}
 
 		if (event.temp.complete){
 			
-			measurement();//производим измерения всех датчков
+			measurement();//производим измерения со всех датчков
 			compare();//сравниваем значения с уровнями
 			execution();//запускаем устройства
 
             event.temp.time = 1;
 			event.temp.complete = 0;
 			event.temp.on = 1;
-		//измерение влажности воздуха и температуры датчиком sht1x
-		//измерение освещенности диодами
 		}
 	}
 }
@@ -149,54 +155,40 @@ void init(void){
 	OSCCONbits.IRCF0 = 0;
 	OSCCONbits.IRCF1 = 1;
 	OSCCONbits.IRCF2 = 1;//freq = 8MGz
-
 	ei();//включаем прерывания
 	configPorts();
 	configI2C();
-
     configADC();
 	configTimers();
-
     configCCP();
-//    configCTMU();
+    configCTMU();
 
 	while(!TMR2IF);
-
 	TRISBbits.RB3 = 0;
 	
-	event.dump.time = 20;
+	event.dump.time = 1;
 	event.dump.on = 1;
-
 	event.temp.time = 1;
 	event.temp.on = 1;
-
 	event.platform.time = 1;
 	event.platform.on = 1;
-
 }
 
 /**
  * измерения
  */
 void measurement(void){
-	  //измерение освещенности датчиком
 	data.temp = mSht1(0);//изм. темпр.
-	data.humi = mSht1(1);//из. влажность
-	calcSht1(&data.temp, &data.humi);//делаем перерасчет
+	data.humi = mSht1(1);//изм. влажность
+	calcSht1(&data.temp, &data.humi);//перерасчет
 
-    data.light = mLight();
-//измерение температуры
-//  measurementTemp();
-//измерение влажности почвы
-//  mC();
-
+    data.light = mLight();//освещенность
 }
 
 /**
  * сравнение значений с уровнями
  */
 void compare(void){
-	
     //сравнение с показаниями и принятие решение какие устройства должны быть включены
     if (data.temp < level.minTemp && !isLamp()){
             run.lampOn = 1;
@@ -215,7 +207,6 @@ void compare(void){
  * запуск устройства
  */
 void execution(void){
-
 	if (run.lampOn){
 		LATBbits.LATB5 = 0;
 		run.lampOn = 0;
@@ -235,52 +226,16 @@ void execution(void){
 	SetDCEPWM2(calcPWM());
 }
 
-/*void measurementTemp(void){
-
-  float t[2];
-  char error = 0;
-
-  IdleI2C1();
-  StartI2C1();
-
-  IdleI2C1();
-  if (WriteI2C1(0x90 & 0xfe) == -2){
-	  error = 1;
-  }
-
-  IdleI2C1();
-  if (WriteI2C1(0x00) == -2){
-	  error = 1;
-  }
-
-  IdleI2C1();
-  RestartI2C1();
-
-  IdleI2C1();
-  if (WriteI2C1(0x90 | 0x01)){
-	  error = 1;
-  }
-
-  IdleI2C1();
-  t[0] = ReadI2C1();
-  AckI2C1();
-
-  IdleI2C1();
-  t[1] = ReadI2C1();
-  IdleI2C1();
-  NotAckI2C1();
-  StopI2C1();
-
-  data.temp = t[0]+(float)0xff/t[1];
-}*/
-
-/*    void mC(void){
-
+/**
+ * измерение емкости
+ * измеренные значения емкости
+ */
+float mC(void){
       unsigned int Vread=0;
       float voltage;// Vcal=0, CTMUISrc = 0;
       float time = 15;
       float current = 0.55;//experiment time*current
-      float ownCap = 0;//own capacitance
+      float ownCap = 33.5;//own capacitance
       float v = 3.25;
 
       CTMUCONHbits.CTMUEN = 1; //Enable the CTMU
@@ -300,10 +255,9 @@ void execution(void){
       PIR1bits.ADIF = 0; //Clear A/D Interrupt Flag
 
       Vread = ADRES;
-
       voltage = (float)(v*Vread/1023.0);
-      data.capacitance = (float)(time*current/voltage - ownCap);//result in pf
-    }*/
+      return (float)(time*current/voltage - ownCap);//result in pf
+    }
 
 /**
  * измерение влажности или температуры воздуха
@@ -313,15 +267,9 @@ void execution(void){
  */
 int mSht1(char param){
 
-//char STATUS_REG_W 0x06   //000   0011    0
-//char STATUS_REG_R 0x07   //000   0011    1
-//char RESET_SENSOR 0x1e   //000   1111    0
-
     char humi = 0;
     char temp = 1;
-
     char address = (param == temp)?0x03:0x05;
-
 	char checksum;
 	int result;
 
@@ -428,16 +376,12 @@ unsigned int mLight(void){
         StartI2C();
 
         IdleI2C();
-        if (WriteI2C(0x46) == -2){
-			//l-level 0xB8
-			//h-level 0x46
+        if (WriteI2C(0x46) == -2){//l-level 0xB8 //h-level 0x46
           while(1);
         }
 
         IdleI2C();
-        if (WriteI2C(0x13) == -2){
-                //0x10 h-res
-                //0x13 l-res
+        if (WriteI2C(0x13) == -2){//0x10 h-res  //0x13 l-res
 			while(1);
         }
 
@@ -450,9 +394,7 @@ unsigned int mLight(void){
         StartI2C();
 
         IdleI2C();
-        if (WriteI2C(0x47) == -2){
-                //l-level 0x47
-                //h-level 0xB9
+        if (WriteI2C(0x47) == -2){//l-level 0x47  //h-level 0xB9
                 while(1);
         }
 
@@ -473,13 +415,15 @@ unsigned int mLight(void){
 int mADC(void){
   ADRESH=0;//clear the ADC result register
   ADRESL=0;//clear the ADC result register
-
   /* Read ADC*/
   ConvertADC(); // stop sampling and starts adc conversion
   while(BusyADC()); //wait untill the conversion is completed
   return ReadADC();//read the result of conversion
 }
-// measurement block
+
+/**
+ * обработчик прерывания
+ */
 void interrupt oneDegInterupt(void){
     int timer1Deg = 0xF937;
 
@@ -524,23 +468,17 @@ void interrupt oneDegInterupt(void){
  * @return -1 - ошибка, 0 - продолжаем вращение в том-же направлелнии, 1 - влкючили поворот
  */
 int turnPlatform(int move){
-//	unsigned int time = 0xA470;//3 sec
-	//(4*256)/8×106 = 128uS
-	//1/128uS = 7813 - 1s
     if ((!LATBbits.LATB4 && move < 0) || (!LATBbits.LATB2 && move > 0)){
 		return -1;
     }
-
     if(!LATBbits.LATB2 || !LATBbits.LATB4){
         return 0;
     }
-
 	if (move > 0){
 		LATBbits.LATB4 = 0;
 	} else if (move < 0){
 		LATBbits.LATB2 = 0;
 	} 
-
     return 1;
 }
 
@@ -556,6 +494,7 @@ void offPlatform(){
  * расчет максимального угла освещенности
  */
 int calcMaxDeg(void){
+
 	int i;
 	float val=0;
 	int result=0;
@@ -570,7 +509,7 @@ int calcMaxDeg(void){
 	return (int)((result+1)*data.lightPlatform.iterationDeg);
 }
 
-//выявляем зависимость напряжения подаваемого на шим от освещенности
+//зависимость напряжения подаваемого на шим от освещенности
 int calcPWM(void){
 	return ~data.light;
 }
@@ -652,47 +591,34 @@ void configPorts(void){
  * конфигурирования I2C
  */
 void configI2C(void){
+
 	TRISC = 0x18;//input rc3 and rc4
 	SSP1ADD = 0xf9;					// 100KHz (Fosc = 4MHz)
-//	OSCCON = 0b01101010;            // Fosc = 4MHz (Inst. clk = 1MHz)
 	ANSELC = 0x0;					// No analog inputs req'
 
 	OpenI2C1(MASTER, SLEW_OFF);
 	DisableIntI2C1;
 }
 
-/*void configCTMU(void){
-  //CTMUCONH/1 - CTMU Control registers
+/**
+ * конфигурирование CTMU
+ */
+void configCTMU(void){
+
   CTMUCONH = 0x00;
-  //make sure CTMU is disabled
   CTMUCONL = 0x90;
-  //CTMU continues to run when emulator is stopped,CTMU continues
-  //to run in idle mode,Time Generation mode disabled, Edges are blocked
-  //No edge sequence order, Analog current source not grounded, trigger
-  //output disabled, Edge2 polarity = positive level, Edge2 source =
-  //source 0, Edge1 polarity = positive level, Edge1 source = source 0,
-  //CTMUICON - CTMU Current Control Register
-  CTMUICON = 0x01;
-  //0.55uA, Nominal - No Adjustment
-  /
-  //Set up AD converter;
-  /
+  CTMUICON = 0x01;//0.55uA, Nominal - No Adjustment
   TRISA=0x04;
-  //set channel 2 as an input
-  // Configure AN2 as an analog channel
-  ANSELAbits.ANSA2=1;
-  TRISAbits.TRISA2=1;
-  // ADCON2
+  ANSELAbits.ANSA2=1;//set channel 2 as an input
+  TRISAbits.TRISA2=1;  // Configure AN2 as an analog channel
   ADCON2bits.ADFM=1;
   ADCON2bits.ACQT=1;
   ADCON2bits.ADCS=2;
-  // ADCON1
   ADCON1bits.PVCFG0 =0;
   ADCON1bits.NVCFG1 =0;
-  // ADCON0
   ADCON0bits.CHS=2;
   ADCON0bits.ADON=1;
-}*/
+}
 
 /**
  * конфигурирование модуля АЦП
@@ -701,17 +627,9 @@ void configADC(void){
 
     TRISA = 0x03;
 
-//	unsigned char config1 = 0, config2 = 0, config3 = 0;
-
-//	config1 = ADC_FOSC_2 | ADC_RIGHT_JUST | ADC_2_TAD;
-//	config2 = ADC_CH0 | ADC_INT_OFF | ADC_REF_VDD_VSS;
-//	config3 = ADC_2ANA;
-
-//todo разобарться с этим
 	ADCON0 = 0b00000001;
 	ADCON1 = 0b00001111;
 	ADCON2 = 0b10001000;
-//	OpenADC(config1, config2, config3);
 }
 
 /**
@@ -722,42 +640,14 @@ void configTimers(void){
 	T0CONbits.TMR0ON = 1;//enables timer
 	T0CONbits.T08BIT = 0;//1 - 8bit 0 - 16 bit
 	T0CONbits.PSA = 0;
-	//prescale settings
-	T0CONbits.T0PS0 = 1;//1:256
+	T0CONbits.T0PS0 = 1;////prescale settings 1:256
 	T0CONbits.T0PS1 = 1;
 	T0CONbits.T0PS2 = 1;
-
 	T0CONbits.T0CS = 0;//internal
-
-//	TMR0H = 0;//reset
-//	TMR0L = 0;
 	INTCONbits.TMR0IE = 1;//ienable timer0 overflow interrupt
-//	WriteTimer0(timer1Deg);
-//	OpenTimer0();
-
-	/*
-	T1CONbits.TMR1CS0 = 0;//fosc/4
-	T1CONbits.TMR1CS0 = 0;
-
-	T1CONbits.T1CKPS0 = 1; //prescale 1:8
-	T1CONbits.T1CKPS1 = 1;
-
-	T1CONbits.T1RD16 = 1;//16bit
-	T1CONbits.TMR1ON = 1;//on
-	PIE1bits.TMR1IE = 1;
-	INTCONbits.PEIE = 1;
-
-//	T1CONbits.T1SYNC = 1;
-//	T1CONbits.T1SOSCEN = 1;//secondary oscilator
-	WriteTimer0(timer05sec);
-	 */
 
 	TMR2IF = 0;
-//	T2CONbits.
-
-	T2CONbits.TMR2ON = 1;
-	//prescale
-
+	T2CONbits.TMR2ON = 1;//prescale
 }
 
 /**
@@ -769,17 +659,9 @@ void configCCP(void){
     CCP2CONbits.CCP2M1 = 0;
     CCP2CONbits.CCP2M2 = 1;
     CCP2CONbits.CCP2M3 = 1;
-
 //	PSTR2CONbits.STR2SYNC = 1;//управление происходить со след шим периодом
-//	PSTR2CONbits.STR2B = 1;//используем b порт
-
 	CCPTMRS0bits.C2TSEL0 = 0;//выбираем таймер 2
 	CCPTMRS0bits.C2TSEL1 = 0;
-
 	PR2bits.PR2 = 0x65; //установить период 19.61khz resloution 8bit
-
-//	CCPR2Lbits.CCPR2L = 0x30; //устанавливаем длительность
-//	CCPR2Lbits.CCPR2L = 0x30; //устанавливаем длительность
-	CCPR2L = 0x45;
-	//проверить чтобы порт был как выход rb3
+	CCPR2L = 0x45;//устанавливаем длительность
 }
