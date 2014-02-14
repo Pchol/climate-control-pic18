@@ -16,12 +16,12 @@
 	    struct {
 			int maxDeg;
 			int iterationDeg;
-			int startMeasurement;
-            int closeMeasurement;
+            int status;//0-измерения не проводились, 1 проводится измерение, 2 возврат на нужн. угол, 3 остановка, 4 конец
+            int currentDeg;//текущий угол измерения
 			float diod1[36];
 			float diod2[36];
         } lightPlatform;
-	} data = {0, 0, 0, 0, 0, {360, 10, 1}};
+	} data = {0, 0, 0, 0, 0, {360, 10, 0}};
 
     struct {
         char maxTemp;
@@ -63,7 +63,7 @@
   unsigned int mLight(void);
   int mADC(void);
   float mC(void);
-  void mLightPlatform(void);
+  void mLightDiods(float *rightDiod, float *leftDiod);
   
   int calcPWM(void);
   int calcMaxDeg(void);
@@ -89,49 +89,74 @@
   int turnPlatform(int move);
   void offPlatform(void);
 
+  int secToDeg(int sec);
+
 void main(void) {
 	init();
 
 	while(1){
 
 		if (event.platform.complete){
-			if (!data.lightPlatform.closeMeasurement){
-				mLightPlatform();
-				event.platform.time = data.lightPlatform.iterationDeg;
-                if (data.lightPlatform.closeMeasurement){//измерение закончено, ждем 1 секунду
-                    event.platform.time = 5;//one sec wait
+
+			if (data.lightPlatform.status == 0){//старт
+                data.lightPlatform.currentDeg = 0;
+                turnPlatform(1);
+				mLightDiods(&data.lightPlatform.diod1[0], &data.lightPlatform.diod2[0]);
+                data.lightPlatform.status = 1;
+                event.platform.time = data.lightPlatform.iterationDeg;
+
+            } else if (data.lightPlatform.status == 1){//измерения
+
+                if (data.lightPlatform.currentDeg != data.lightPlatform.maxDeg){
+                    int i = data.lightPlatform.currentDeg/data.lightPlatform.maxDeg;
+                    mLightDiods(&data.lightPlatform.diod1[i], &data.lightPlatform.diod2[i]);
+                    data.lightPlatform.currentDeg += data.lightPlatform.iterationDeg;
+                    event.platform.time = data.lightPlatform.iterationDeg;
+                } else {
+                    offPlatform();
+                    data.degMaxLight = calcMaxDeg();
+					data.lightPlatform.status = 2;
+                    event.platform.time = secToDeg(1);
                 }
-				event.platform.on = 1;
-			} else {
-				if (!isTurn()){
-                    int returnDeg = -(data.lightPlatform.maxDeg - data.degMaxLight);
-                    if (returnDeg < 0){
-						turnPlatform(-1);
-                        event.platform.time = returnDeg;
-						event.platform.on = 1;
-                    }
-				} else {
-					offPlatform();//не устанавливаем event.platform.on, на этом этапе заканчивается работа с платформой
-				}
-			}
+
+            } else if (data.lightPlatform.status == 2){//возврат на нужный угол
+				int returnDeg = -(data.lightPlatform.maxDeg - data.degMaxLight);
+				if (returnDeg < 0){
+                    turnPlatform(-1);
+                    event.platform.time = returnDeg;
+					data.lightPlatform.status = 3;
+                } else {
+					data.lightPlatform.status = 4;
+                    event.platform.time = 1;
+                }
+                
+            } else if (data.lightPlatform.status == 3){//остановка
+                offPlatform();
+                data.lightPlatform.status = 4;
+				event.platform.time = 2;
+            }
+
 			event.platform.complete = 0;
+            if (data.lightPlatform.status != 4){
+				event.platform.on = 1;
+            }
 		}
 
 		if (event.dump.complete){
 			if (!isDump()){
-				data.capacitance = mC();//емкость
+				data.capacitance = mC();
                 if (data.capacitance < level.minCapacitance){
 					LATBbits.LATB1 = 0;
-                    event.dump.time = 15;//длительность работы насоса
+                    event.dump.time = secToDeg(5);//длительность работы насоса
                 } else {
-                    event.dump.time = 100;//время между измерениями
+                    event.dump.time = secToDeg(30);//время между измерениями
                 }
 
                 event.dump.on = 1;
 			} else if (isDump()){
 					LATBbits.LATB1 = 1;
 
-                    event.dump.time = 300;//1min ждем, пока вода опустится до дна
+                    event.dump.time = secToDeg(60);//1min ждем, пока вода опустится до дна
                     event.dump.on = 1;
 			}
 			event.dump.complete = 0;
@@ -336,33 +361,15 @@ void calcSht1(float *codeHumi, float *codeTemp){
 }
 
 /**
- * значения измерений сохраняются в data.degMaxLight, при последней итерации
- * устанавливается data.lightPlatform.closeMeasurement.
- * Первая итерация вкл. поворотную платформу, последняя - выключает
+ * считываем значения с диодов
  */
-void mLightPlatform(void){
-   	static int currentDeg = 0;
+void mLightDiods(float *rightDiod, float *leftDiod){
+	SetChanADC(ADC_CH0);
+	*rightDiod = (float)mADC()*3.3/1023;
+	__delay_ms(20);
 
-    if (data.lightPlatform.startMeasurement){//запуск
-        data.lightPlatform.startMeasurement = 0;
-        currentDeg = 0;
-		turnPlatform(1);
-    }
-	if (currentDeg != data.lightPlatform.maxDeg){
-		SetChanADC(ADC_CH0);
-		data.lightPlatform.diod1[currentDeg/data.lightPlatform.iterationDeg] = (float)mADC()*3.3/1023;
-		__delay_ms(20);
-
-		SetChanADC(ADC_CH1);
-		data.lightPlatform.diod2[currentDeg/data.lightPlatform.iterationDeg] = (float)mADC()*3.3/1023;
-		__delay_ms(20);
-
-		currentDeg += data.lightPlatform.iterationDeg;
-    } else if (!data.lightPlatform.closeMeasurement){ // окончание
-        data.lightPlatform.closeMeasurement = 1;
-		offPlatform();
-		data.degMaxLight = calcMaxDeg();
-    }
+	SetChanADC(ADC_CH1);
+	*leftDiod = (float)mADC()*3.3/1023;
 }
 
 /**
@@ -664,4 +671,12 @@ void configCCP(void){
 	CCPTMRS0bits.C2TSEL1 = 0;
 	PR2bits.PR2 = 0x65; //установить период 19.61khz resloution 8bit
 	CCPR2L = 0x45;//устанавливаем длительность
+}
+
+/**
+ * функция преобразования секунд в углы (значения приблизитеьные)
+ * @return значение углов
+ */
+int secToDeg(int sec){
+    return (int)(4.5*(float)sec);//угол равен 1/4.5 с
 }
