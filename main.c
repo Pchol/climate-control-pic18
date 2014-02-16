@@ -35,7 +35,7 @@
         char maxHumi;
         char minHumi;
         char minCapacitance;
-    } level = {28, 26, 25, 23, 30};
+    } level = {33, 30, 34, 32, 30};
 
     struct {
         char lampOn;
@@ -200,20 +200,20 @@
       while(!TMR2IF);
       TRISBbits.RB3 = 0;
       
-//      event.dump.time = 1;
-//      event.dump.on = 1;
-      event.temp.time = 1;
-      event.temp.on = 1;
-      event.platform.time = 1;
-      event.platform.on = 1;
+      event.dump.time = 1;
+      event.dump.on = 1;
+//      event.temp.time = 1;
+//      event.temp.on = 1;
+//      event.platform.time = 1;
+//      event.platform.on = 1;
   }
 
   /**
    * измерения
    */
   void measurement(void){
-      data.temp = mSht1(0);//изм. темпр.
-      data.humi = mSht1(1);//изм. влажность
+      data.temp = mSht1(1);//изм. темпр.
+      data.humi = mSht1(0);//изм. влажность
       calcSht1(&data.temp, &data.humi);//перерасчет
 
       data.light = mLight();//освещенность
@@ -354,7 +354,9 @@
    * @param codeTemp значение температуры в цифровом коде
    * функция записывает значения в указатели codeHumi, codeTemp
    */
-  void calcSht1(float *codeHumi, float *codeTemp){
+  void calcSht1(float *codeTemp, float *codeHumi){
+	  float t = *codeTemp;
+	  float ch = *codeHumi;
 
       float C1=-4.0;              // for 12 Bit
       float C2=+0.0405;           // for 12 Bit
@@ -365,8 +367,14 @@
       float d1=-39.66;
       float d2=0.01;
 
-      *codeTemp = d2**codeTemp+d1;
-      *codeHumi = (*codeTemp-25)*(T1+T2**codeHumi)+C1+C2**codeHumi+C3**codeHumi**codeHumi;
+	  t=d2*t+d1;
+	  ch=(t-25)*(T1+T2*ch)+C1+C2*ch+C3*ch*ch;
+
+//	  *codeTemp=d2*(*codeTemp)+d1;
+//      *codeHumi=(*codeTemp-25)*(T1+T2**codeHumi)+C1+C2**codeHumi+C3**codeHumi**codeHumi;
+
+	  *codeTemp = t;
+	  *codeHumi = ch;
 
       //if(rh_true>100)rh_true=100;       //cut if the value is outside of
       // if(rh_true<0.1)rh_true=0.1;       //the physical possible range
@@ -537,13 +545,19 @@ int calcPWM(void){
 	} else {
 		return 0;
 	}*/
+	static int i;
 
     if (data.light > 1500){
 		LATCbits.LATC1 = 0;
         return 0;
     } else {
 		LATCbits.LATC1 = 1;
-		return (int)(0x65 - data.light/15);
+		i++;
+		i++;
+		if (i>0x65){
+			i = 0;
+		}
+		return (int)(0x65 - i);
     }
 }
 
