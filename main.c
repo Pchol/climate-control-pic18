@@ -4,6 +4,11 @@
 #include <plib/i2c.h>
 #include <plib/timers.h>
 #include <plib/pwm.h>
+//индикация
+//A6 - насос
+//A5 - лампа
+//A4 - ветнилятор
+//C1 - светодиоды
 
 #define USE_OR_MASKS
 
@@ -19,8 +24,8 @@
             int iterationDeg;
             int status;//0-измерения не проводились, 1 проводится измерение, 2 возврат на нужн. угол, 3 остановка, 4 конец
             int currentDeg;//текущий угол измерения
-            float diod1[360];
-            float diod2[360];
+            float diod1[36];
+            float diod2[36];
         } lightPlatform;
     } data = {0, 0, 0, 0, 0, {360, 10, 0}};
 
@@ -149,6 +154,7 @@
                     data.capacitance = mC();
                     if (data.capacitance < level.minCapacitance){
                         LATBbits.LATB1 = 0;
+						LATAbits.LATA6 = 1;//indication
                         event.dump.time = secToDeg(5);//длительность работы насоса
                     } else {
                         event.dump.time = secToDeg(30);//время между измерениями
@@ -156,6 +162,7 @@
                     event.dump.on = 1;
                 } else if (isDump()){
                     LATBbits.LATB1 = 1;
+					LATAbits.LATA6 = 0;//indication
 
                     event.dump.time = secToDeg(60);//1min ждем, пока вода опустится до дна
                     event.dump.on = 1;
@@ -193,12 +200,12 @@
       while(!TMR2IF);
       TRISBbits.RB3 = 0;
       
-      event.dump.time = 1;
-      event.dump.on = 1;
+//      event.dump.time = 1;
+//      event.dump.on = 1;
       event.temp.time = 1;
       event.temp.on = 1;
-      event.platform.time = 1;
-      event.platform.on = 1;
+//      event.platform.time = 1;
+//      event.platform.on = 1;
   }
 
   /**
@@ -236,16 +243,20 @@
   void execution(void){
       if (run.lampOn){
           LATBbits.LATB5 = 0;
+		  LATAbits.LATA5 = 1;
           run.lampOn = 0;
       } else if (run.lampOff){
           LATBbits.LATB5 = 1;
+		  LATAbits.LATA5 = 0;
           run.lampOff = 0;
       }
 
       if (run.fanOn){
           LATCbits.LATC2 = 1;
+		  LATAbits.LATA4 = 1;
           run.fanOn = 0;
       } else if (run.fanOff){
+		  LATAbits.LATA4 = 0;
           LATCbits.LATC2 = 0;
           run.fanOff = 0;
       }
@@ -300,7 +311,6 @@
       char checksum;
       int result;
 
-      //	select temp register
       IdleI2C1();
       StartI2C1();
       IdleI2C1();
@@ -520,7 +530,21 @@ int calcMaxDeg(void){
 
 //зависимость напряжения подаваемого на шим от освещенности
 int calcPWM(void){
-    return ~data.light;
+    //0x65 - max;
+	/*
+	if (data.light > 100){
+		return 0x65;
+	} else {
+		return 0;
+	}*/
+
+    if (data.light > 1500){
+		LATCbits.LATC1 = 0;
+        return 0;
+    } else {
+		LATCbits.LATC1 = 1;
+		return (int)(0x65 - data.light/15);
+    }
 }
 
 /**
@@ -581,6 +605,12 @@ int isDump(void){
 void configPorts(void){
     TRISB = 0;//all output
     TRISC = 0;//all output
+	//diods
+	TRISAbits.RA4 = 0;
+	TRISAbits.RA5 = 0;
+	TRISAbits.RA6 = 0;
+	TRISCbits.RC1 = 0;
+
     TRISBbits.RB3 = 1;//for pwm (1 if after timer interrupt is set 0) 0 else
 
 //	исоплнительные механизмы
@@ -671,7 +701,8 @@ void configCCP(void){
     CCPTMRS0bits.C2TSEL0 = 0;//выбираем таймер 2
     CCPTMRS0bits.C2TSEL1 = 0;
     PR2bits.PR2 = 0x65; //установить период 19.61khz resloution 8bit
-    CCPR2L = 0x45;//устанавливаем длительность
+
+    CCPR2L = 0x0;//устанавливаем длительность
 }
 
 /**
