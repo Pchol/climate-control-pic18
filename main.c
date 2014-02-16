@@ -35,7 +35,7 @@
         char maxHumi;
         char minHumi;
         char minCapacitance;
-    } level = {40, 38, 25, 30, 30};
+    } level = {28, 26, 25, 23, 30};
 
     struct {
         char lampOn;
@@ -204,8 +204,8 @@
 //      event.dump.on = 1;
       event.temp.time = 1;
       event.temp.on = 1;
-//      event.platform.time = 1;
-//      event.platform.on = 1;
+      event.platform.time = 1;
+      event.platform.on = 1;
   }
 
   /**
