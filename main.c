@@ -141,6 +141,10 @@
                     offPlatform();
                     data.lightPlatform.status = 4;
                     event.platform.time = 2;
+
+				  event.temp.time = 1;
+				  event.temp.on = 1;
+
                 }
 
                 event.platform.complete = 0;
@@ -200,12 +204,12 @@
       while(!TMR2IF);
       TRISBbits.RB3 = 0;
       
-      event.dump.time = 1;
-      event.dump.on = 1;
+//      event.dump.time = 1;
+//      event.dump.on = 1;
 //      event.temp.time = 1;
 //      event.temp.on = 1;
-//      event.platform.time = 1;
-//      event.platform.on = 1;
+      event.platform.time = 1;
+      event.platform.on = 1;
   }
 
   /**
@@ -261,7 +265,8 @@
           run.fanOff = 0;
       }
 
-      SetDCEPWM2(calcPWM());
+	  CCPR2L = calcPWM();
+//      SetDCEPWM2(calcPWM());
   }
 
   /**
@@ -545,7 +550,7 @@ int calcPWM(void){
 	} else {
 		return 0;
 	}*/
-	static int i;
+	static int i = 0x15;
 
     if (data.light > 1500){
 		LATCbits.LATC1 = 0;
@@ -555,9 +560,9 @@ int calcPWM(void){
 		i++;
 		i++;
 		if (i>0x65){
-			i = 0;
+			i = 0x15;
 		}
-		return (int)(0x65 - i);
+		return (int)(i);
     }
 }
 
@@ -625,6 +630,11 @@ void configPorts(void){
 	TRISAbits.RA6 = 0;
 	TRISCbits.RC1 = 0;
 
+	LATAbits.LATA4 = 0;
+	LATAbits.LATA5 = 0;
+	LATAbits.LATA6 = 0;
+	LATCbits.LATC1 = 0;
+
     TRISBbits.RB3 = 1;//for pwm (1 if after timer interrupt is set 0) 0 else
 
 //	исоплнительные механизмы
@@ -645,7 +655,7 @@ void configPorts(void){
  */
 void configI2C(void){
 
-    TRISC = 0x18;//input rc3 and rc4
+    TRISC |= 0x18;//input rc3 and rc4
     SSP1ADD = 0xf9;					// 100KHz (Fosc = 4MHz)
     ANSELC = 0x0;					// No analog inputs req'
 
