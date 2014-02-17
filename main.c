@@ -35,7 +35,7 @@
         char maxHumi;
         char minHumi;
         char minCapacitance;
-    } level = {33, 30, 34, 32, 30};
+    } level = {25, 22, 34, 32, 30};
 
     struct {
         char lampOn;
@@ -115,9 +115,9 @@
                   } else if (data.lightPlatform.status == 1){//измерения
 
                       if (data.lightPlatform.currentDeg != data.lightPlatform.maxDeg){
-                          int i = data.lightPlatform.currentDeg/data.lightPlatform.maxDeg;
-                          mLightDiods(&data.lightPlatform.diod1[i], &data.lightPlatform.diod2[i]);
                           data.lightPlatform.currentDeg += data.lightPlatform.iterationDeg;
+                          int i = data.lightPlatform.currentDeg/data.lightPlatform.iterationDeg;
+                          mLightDiods(&data.lightPlatform.diod1[i], &data.lightPlatform.diod2[i]);
                           event.platform.time = data.lightPlatform.iterationDeg;
                       } else {
                           offPlatform();
@@ -624,7 +624,16 @@ int isDump(void){
 void configPorts(void){
     TRISB = 0;//all output
     TRISC = 0;//all output
+    TRISC |= 0x18;//input rc3 and rc4//for i2c
 	//diods
+	
+    TRISAbits.RA2=1;  // Configure AN2 as an analog channel
+
+	TRISAbits.RA0 = 1;//for adc
+	TRISAbits.RA1 = 1;
+	//
+
+
 	TRISAbits.RA4 = 0;
 	TRISAbits.RA5 = 0;
 	TRISAbits.RA6 = 0;
@@ -638,7 +647,7 @@ void configPorts(void){
     TRISBbits.RB3 = 1;//for pwm (1 if after timer interrupt is set 0) 0 else
 
 //	исоплнительные механизмы
-    
+
     //fan
     LATCbits.LATC2 = 0;//fan default off
     LATBbits.LATB0 = 0;//for ligth sensor h-level address
@@ -655,7 +664,6 @@ void configPorts(void){
  */
 void configI2C(void){
 
-    TRISC |= 0x18;//input rc3 and rc4
     SSP1ADD = 0xf9;					// 100KHz (Fosc = 4MHz)
     ANSELC = 0x0;					// No analog inputs req'
 
@@ -671,9 +679,7 @@ void configCTMU(void){
     CTMUCONH = 0x00;
     CTMUCONL = 0x90;
     CTMUICON = 0x01;//0.55uA, Nominal - No Adjustment
-    TRISA=0x04;
     ANSELAbits.ANSA2=1;//set channel 2 as an input
-    TRISAbits.TRISA2=1;  // Configure AN2 as an analog channel
     ADCON2bits.ADFM=1;
     ADCON2bits.ACQT=1;
     ADCON2bits.ADCS=2;
@@ -688,7 +694,6 @@ void configCTMU(void){
  */
 void configADC(void){
 
-    TRISA = 0x03;
     ADCON0 = 0b00000001;
     ADCON1 = 0b00001111;
     ADCON2 = 0b10001000;
