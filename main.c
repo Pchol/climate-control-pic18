@@ -6,6 +6,7 @@
 //    #include <plib/ctmu.h>
 #include <plib/i2c.h>
 #include <plib/timers.h>
+#include <plib/pwm.h>
 
 #define USE_OR_MASKS
 
@@ -91,13 +92,14 @@
   void configI2C(void);
   void configADC(void);
   void configTimers(void);
+  void configCCP(void);
 
   int isLamp(void);
   int isTurn(void);
   int isFan(void);
   int isDump(void);
 
-  void interrupt oneDegInterupt(void);
+//  void interrupt oneSecInterupt(void);
   int turnPlatform(int deg);
 
 //main
@@ -107,41 +109,15 @@ void main(void) {
 	
 	//выставляем значения по умолчанию для событий
 
-	while(1){//check events
-		if (event.lightDiods.complete){
-			//измеряем текущ показание
-			//если показание последнее смотрим куда нужно сдвинуть, и сдвигаем назад
-			//возвращаемся
+	while(!TMR2IF);
 
-		} 
+	TRISBbits.RB3 = 1;
 
-		if (event.dump.complete){
-			//самое время запустить насос или остановить
-		}
-
-		if (event.platform.complete){
-			//1) при первом измерении освещенности
-			//2) при смещении на нужный угол
-			//3) при авторегулировании
-
-		}
-
-		if (event.temp.complete){
-			//производим измерения всех датчков
-			//если есть какие-то изменения, то влк/выкл лампу... или вкл/выкл вентилятор и пр...
-
-	      mLight();
-	//  измерение влажности воздуха и температуры датчиком sht1x
-      mHumiTemp();
-	  //измерение освещенности диодами
-
-
-
-		}
-
+	while(1){
 //		measurement();
 //		compare();
 //		execution();
+		__delay_ms(20);
 	}
 }
 
@@ -152,20 +128,20 @@ void init(void){
 	OSCCONbits.IRCF1 = 1;
 	OSCCONbits.IRCF2 = 1;//freq = 8MGz
 
-	ei();
+//	ei();
 	configPorts();
 	configI2C();
 
     configADC();
 	configTimers();
 
+    configCCP();
 //    configCTMU();
 
 }
 
 
 void measurement(void){
-	static int one = 1;
 	  //измерение освещенности датчиком
 
 //	    measurementLightDiods();
@@ -178,11 +154,14 @@ void measurement(void){
 }
 
 void compare(void){
+	
+/*
     static int one = 0;
     if (!isTurn() && data.lightPlatform.closeMeasurement && !one){
         run.move = 1;
 		one = 1;
     }
+ */
 /*
     //сравнение с показаниями и принятие решение какие устройства должны быть включены
     if (data.temp < level.minTemp && !isLamp()){
@@ -494,7 +473,7 @@ int isTurn(void){
 	}
 }
 
-void interrupt oneDegInterupt(void){
+/*void interrupt oneSecInterupt(void){
 	if (INTCONbits.TMR0IF == 1){
 	//таймер на 1 deg
 		if (event.platform.on){//проводятся измерение освещенности (движ двиг)
@@ -529,7 +508,7 @@ void interrupt oneDegInterupt(void){
 		WriteTimer0(timer1Deg);
 		INTCONbits.TMR0IF = 0;
 	}
-/*
+///
 	static int i = 20;
 	if (PIR1bits.TMR1IF){
 		i--;
@@ -541,8 +520,8 @@ void interrupt oneDegInterupt(void){
 		WriteTimer3(timer05sec);
 		PIR1bits.TMR1IF = 0;
 	}
-*/
-}
+/
+}*/
 
 int turnPlatform(int deg){
 //	int mov;
@@ -611,12 +590,14 @@ int isDump(void){
 //config
 void configPorts(void){
 	TRISB = 0;//all output
-	TRISC = 0;//
+	TRISC = 0;//all output
+	TRISBbits.RB3 = 0;//for pwm
+
 //	исоплнительные механизмы
 	LATCbits.LATC2 = 0;//fan default off
 
 	LATBbits.LATB0 = 0;//for ligth sensor h-level address
-	LATBbits.LATB3 = 1;//turn platform default stay
+	LATBbits.LATB3 = 0;//turn platform default stay
 	LATBbits.LATB4 = 1;
     LATBbits.LATB1 = 1; //pump default off
 }
@@ -713,4 +694,32 @@ void configTimers(void){
 //	T1CONbits.T1SOSCEN = 1;//secondary oscilator
 	WriteTimer0(timer05sec);
 	 */
+
+	TMR2IF = 0;
+//	T2CONbits.
+
+	T2CONbits.TMR2ON = 1;
+	//prescale
+
+}
+
+void configCCP(void){
+
+    CCP2CONbits.CCP2M0 = 0;//mode pwm
+    CCP2CONbits.CCP2M1 = 0;
+    CCP2CONbits.CCP2M2 = 1;
+    CCP2CONbits.CCP2M3 = 1;
+
+//	PSTR2CONbits.STR2SYNC = 1;//управление происходить со след шим периодом
+//	PSTR2CONbits.STR2B = 1;//используем b порт
+
+	CCPTMRS0bits.C2TSEL0 = 0;//выбираем таймер 2
+	CCPTMRS0bits.C2TSEL1 = 0;
+
+	PR2bits.PR2 = 0x65; //установить период 19.61khz resloution 8bit
+
+//	CCPR2Lbits.CCPR2L = 0x30; //устанавливаем длительность
+//	CCPR2Lbits.CCPR2L = 0x30; //устанавливаем длительность
+	CCPR2L = 0x60;
+	//проверить чтобы порт был как выход rb3
 }
